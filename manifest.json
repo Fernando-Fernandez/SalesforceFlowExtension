@@ -1,0 +1,52 @@
+{
+    "manifest_version": 3
+    , "name": "Salesforce Flow Extension"
+    , "version": "1.0"
+    , "description": "Shows tooltips on flow elements"
+  
+    , "content_scripts": [
+      {
+        "js": [
+          "scripts/content.js"
+        ]
+        , "type": "module"
+        , "matches": [
+          "https://*.salesforce.com/*",
+          "https://*.visual.force.com/*",
+          "https://*.lightning.force.com/*",
+          "https://*.cloudforce.com/*",
+          "https://*.visualforce.com/*"
+        ]
+        , "all_frames": true
+      }
+    ]
+    , "web_accessible_resources": [ {
+      "matches": [ 
+        "https://*.salesforce.com/*",
+        "https://*.visual.force.com/*",
+        "https://*.lightning.force.com/*",
+        "https://*.cloudforce.com/*",
+        "https://*.visualforce.com/*" 
+      ],
+      "resources": [ "scripts/*" ]
+    } ]
+  
+    , "background": {
+      "service_worker": "scripts/background.js"
+      , "type": "module"
+    }
+    , "permissions": [ 
+                "cookies"
+                , "activeTab"
+                , "scripting"
+              ]
+  
+    , "host_permissions": [
+      "https://*.salesforce.com/*",
+      "https://*.visual.force.com/*",
+      "https://*.lightning.force.com/*",
+      "https://*.cloudforce.com/*",
+      "https://*.visualforce.com/*"
+    ]
+  
+  }
