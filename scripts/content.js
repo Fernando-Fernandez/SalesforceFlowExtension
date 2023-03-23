@@ -166,8 +166,10 @@ function displayTooltip( event, displayFlag ) {
             fieldText = aField.outputParameters?.reduce( ( accumulator, currentValue ) => 
                                         accumulator + " / " + currentValue.assignToReference + " = " + currentValue.name
                                         , "" );
+            if( fieldText.length > 2 ) {
+                fieldText = fieldText.substring( 2 );
+            }
         }
-        fieldText = fieldText.substring( 2 );
         let fieldsNode = document.createTextNode( fieldText );
         tooltip.appendChild( fieldsNode );
         tooltip.appendChild( document.createElement( "br" ) );
