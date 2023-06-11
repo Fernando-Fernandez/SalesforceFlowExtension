@@ -113,24 +113,196 @@ function getValue( aValue ) {
                 ?? aValue.booleanValue?? aValue.dateTimeValue?? aValue.dateValue;
 }
 
-function createTooltip( elementName, currentTarget, offsetHorizontal, offsetVertical ) {
+function indexElementsAndReturnDescription() {
+    // collect nodes in the flow metadata and index them in a map
+    const definitionMap = new Map( [
+        [ 'recordCreates', flowDefinition.recordCreates ]
+        , [ 'recordUpdates', flowDefinition.recordUpdates ]
+        , [ 'recordDeletes', flowDefinition.recordDeletes ]
+        , [ 'recordLookups', flowDefinition.recordLookups ]
+        , [ 'decisions', flowDefinition.decisions ]
+        , [ 'subflows', flowDefinition.subflows ]
+        , [ 'screens', flowDefinition.screens ]
+        , [ 'actionCalls', flowDefinition.actionCalls ]
+        , [ 'assignments', flowDefinition.assignments ]
+    ] );
+
+    // populate node map indexed by name
+    const nodeMap = new Map();
+    const screenMap = new Map();
+    const decisionMap = new Map();
+    definitionMap.forEach( ( value, key ) => {
+        value.forEach( aNode => { 
+            // get the node that the current node is pointing to
+            let targetName = aNode.connector?.targetReference;
+
+            // handle next node pointers in decisions
+            // TODO:  implement for loops too
+            if( ! targetName && aNode.rules && aNode.rules.length > 0 ) {
+                targetName = aNode.rules[ 0 ].connector?.targetReference;
+            }
+            if( ! targetName ) {
+                targetName = aNode.defaultConnector?.targetReference;
+            }
+            const faultTargetName = aNode.faultConnector?.targetReference;
+            const newNode = { 
+                ...aNode 
+                , type:  key
+                , targetName:  targetName
+                , faultTargetName:  faultTargetName
+            };
+            nodeMap.set( aNode.name, newNode );
+
+            // create text for screen describing the inputs/outputs
+            if( key === 'screens' ) {
+                const inputFields = aNode.fields.filter( aField => aField.fieldType !== "ComponentInstance" 
+                                                            && aField.fieldType !== "DisplayText" )
+                                            .map( aField => aField.fieldText )
+                                            .join( ", " );
+                const displayFields = aNode.fields.filter( aField => ( aField.fieldType == "ComponentInstance" 
+                                                                        || aField.fieldType == "DisplayText" ) 
+                                                                    && aField.fieldText )
+                                            .map( aField => aField.fieldText 
+                                                    // || aField.inputParameters.map( aParam => `${aParam.name} (${ getValue( aParam.value ) })` )
+                                                    //                         .join( ", " ) 
+                                                                            )
+                                            .join( ", " );
+                const description = ( displayFields ? "displaying:  " + removeHTML( displayFields ) : "" )
+                                + ( inputFields && displayFields ? " and " : "" )
+                                + ( inputFields ? "prompting the user for these fields:  " + inputFields : "" );
+                screenMap.set( aNode.name, description );
+            }
+
+            if( key === 'decisions' ) {
+                // TODO:  describe individual branches
+                const description = "checking these conditions:  " 
+                                + aNode.rules.map( aRule => aRule.label ).join( ", " );
+                decisionMap.set( aNode.name, description );
+            }
+        } );
+    } );
+    // console.log( nodeMap );
+
+    // find a record create/update/delete and trace back to a decision or screen
+    let relevantTypesSet = new Set( [ 'recordCreates', 'recordUpdates', 'recordDeletes', 'actionCalls', 'subflows' ] );
+    let descriptionArray = [];
+
+    // follow the flow element sequence and create descriptions at relevant points
+    let currentNode = nodeMap.get( flowDefinition.startElementReference );
+    let lastDecisionNode, lastDecisionNodeWithPendingBranches;
+    let lastScreenNode;
+    let nextNode = nodeMap.get( currentNode.targetName );
+    let visitedCountMap = new Map();
+    let nodesAlreadyDescribedSet = new Set();
+    while( nextNode || lastDecisionNodeWithPendingBranches ) {
+        // if there are no nodes left to visit, revisit the last decision that wasn't fully explored
+        if( ! nextNode ) {
+            nextNode = lastDecisionNodeWithPendingBranches;
+            // reset last screen that was from different context
+            lastScreenNode = null;
+        }
+
+        // what will be the subsequent node to visit
+        let nextNodeName = nextNode.targetName;
+
+        // count how many times this decision node has been visited
+        // TODO:  implement for loops too
+        if( nextNode.type === 'decisions' ) {
+            let visitedCount = 0;
+            if( visitedCountMap.has( nextNode.name ) ) {
+                visitedCount = visitedCountMap.get( nextNode.name ) + 1;
+            }
+            visitedCountMap.set( nextNode.name, visitedCount );
+
+            // get the next node from the rule that hasn't been visited yet
+            if( visitedCount === nextNode.rules.length ) {
+                // all rules have been visited, proceed to the default branch
+                nextNodeName = nextNode.defaultConnector?.targetReference;
+                lastDecisionNodeWithPendingBranches = null;
+            } else {
+                nextNodeName = nextNode.rules[ visitedCount ].connector?.targetReference;
+                lastDecisionNodeWithPendingBranches = nextNode;
+            }
+        }
+
+        if( currentNode.type === 'screens' ) {
+            lastScreenNode = currentNode;
+        }
+        if( currentNode.type === 'decisions' ) {
+            lastDecisionNode = currentNode;
+        }
+
+        // skip if node not relevant
+        if( ! relevantTypesSet.has( nextNode.type ) ) {
+            currentNode = nextNode;
+            nextNode = nodeMap.get( nextNodeName );
+            continue;
+        }
+
+        // avoid duplicate descriptions
+        if( nodesAlreadyDescribedSet.has( nextNode.name ) ) {
+            currentNode = nextNode;
+            nextNode = nodeMap.get( nextNodeName );
+            continue;
+        }
+        nodesAlreadyDescribedSet.add( nextNode.name )
+
+        // create a description from the pair of nodes
+        let recordAction = ( nextNode.type === 'recordCreates' ? 'inserts ' : '' )
+                            + ( nextNode.type === 'recordUpdates' ? 'updates ' : '' )
+                            + ( nextNode.type === 'recordDeletes' ? 'deletes ' : '' );
+        let description = ( recordAction ? recordAction + nextNode.object + ' record ' : '' )
+                        + ( nextNode.type === 'actionCalls' ? 'calls action ' + nextNode.actionName + " (" + nextNode.actionType + ") " : '' )
+                        + ( nextNode.type === 'subflows' ? 'calls flow ' + nextNode.name + " (" + nextNode.flowName + ") " : '' );;
+        if( lastScreenNode ) {
+            description = description + "after " + screenMap.get( lastScreenNode.name );
+        }
+        if( lastDecisionNode ) {
+            description = description + ( lastScreenNode ? " and " : "" )
+                            + "after " + decisionMap.get( lastDecisionNode.name );
+        }
+
+        descriptionArray.push( description );
+
+        currentNode = nextNode;
+        nextNode = nodeMap.get( nextNodeName );
+    }
+
+    return descriptionArray;
+}
+
+function removeHTML( aValue ) {
+    return aValue.replaceAll( /\<\/?.*?\>/g, '' );
+}
+
+function createTooltip( elementName, currentTarget, offsetHorizontal, offsetVertical, arrowYDistance ) {
     // read flow element position and add offset
     let leftPos = offsetHorizontal + parseInt( currentTarget.style.left );
     leftPos = isNaN( leftPos ) ? offsetHorizontal : leftPos;
     let topPos = offsetVertical + parseInt( currentTarget.style.top );
     topPos = isNaN( topPos ) ? offsetVertical : topPos;
     tooltip = document.createElement( "div" );
-    tooltip.setAttribute( "style", "border: solid 1px darkgray; background-color: lightyellow; width:30em; position: absolute; z-index: 999;"
-                                    + " top: " + topPos + "px; left: " + leftPos + "px;" );
+    tooltip.setAttribute( "style", "border: solid 1px darkgray; " 
+                                    + "background-color: lightyellow; width:30em; " 
+                                    + "position: absolute; z-index: 999; "
+                                    + "top: " + topPos + "px; left: " + leftPos + "px;" );
     let titleNode = document.createTextNode( elementName );
     let boldNode = document.createElement( "strong" );
     boldNode.appendChild( titleNode );
     appendNodeAndLine( boldNode );
 
     currentTarget.parentNode.appendChild( tooltip );
+
+    arrow = document.createElement( "div" );
+    const distanceX = 200, distanceY = 10; // auto-layout should result in top -65, left 50 (with width 350)
+    arrow.setAttribute( "style", "width: " + distanceX + "px; height: 25px; "
+                    + "background-color: darkgray; z-index: 998; position: relative;" 
+                    + "clip-path: polygon(0% 50%, 15px 0%, 15px 47%, 100% 47%, 100% 53%, 15px 53%, 15px 100% ); "
+                    + "top: " + ( topPos - arrowYDistance ) + "px; left: " + ( leftPos - distanceX ) + "px;" );
+    currentTarget.parentNode.appendChild( arrow );
 }
 
-let tooltip;
+let tooltip, arrow;
 function displayTooltip( event, displayFlag ) {
     if( ! flowDefinition ) {
         return;
@@ -138,6 +310,7 @@ function displayTooltip( event, displayFlag ) {
     // remove old tooltip
     if( tooltip ) {
         tooltip.remove();
+        arrow.remove();
     }
 
     // if flag = false, keep it without tooltip
@@ -145,9 +318,27 @@ function displayTooltip( event, displayFlag ) {
         return;
     }
 
+    // determine layout of canvas
+    const layout = flowDefinition.processMetadataValues[ 1 ].value.stringValue;
+    const autoLayout = ( layout == 'AUTO_LAYOUT_CANVAS' );
+
     // tooltip on the start flow element
-    if( event.currentTarget.className === 'start-node-box' ) {
-        createTooltip( 'START FLOW', event.currentTarget, 280, 25 );
+    const isStartElement = ( autoLayout && event.currentTarget.children[ 0 ].children[ 1 ].children[ 1 ].innerText == 'Start' )
+                            || event.currentTarget.className === 'start-node-box';
+
+    if( isStartElement ) {
+        if( autoLayout ) {
+            createTooltip( 'This flow: ', event.currentTarget, 350, 0, 65 );
+
+        } else {
+            createTooltip( 'This flow: ', event.currentTarget, 400, 0, 121 );
+        }
+
+        let descriptionArray = indexElementsAndReturnDescription();
+        descriptionArray.forEach( aDescription => {
+            let descriptionNode = document.createTextNode( ' - ' + aDescription );
+            appendNodeAndLine( descriptionNode );
+        } );
         return;
     }
 
@@ -169,7 +360,12 @@ function displayTooltip( event, displayFlag ) {
         return;
     }
 
-    createTooltip( elementName, event.currentTarget, 150, 40 );
+    if( autoLayout ) {
+        createTooltip( elementName, event.currentTarget, 270, 0, 60 );
+
+    } else {
+        createTooltip( elementName, event.currentTarget, 270, 0, 1 );
+    }
 
     // get subflow name if calling subflow
     try {
