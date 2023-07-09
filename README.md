@@ -10,3 +10,5 @@ It uses the session id to call the Salesforce tooling API and get the flow metad
 
 Then it scans the page looking for flow elements to add a mouse over event handler to each of them. 
 The handlers will get the flow element label and find the respective metadata, then display the relevant information in a tooltip.
+
+The extension can be found in Chrome Web Store at:  https://chrome.google.com/webstore/detail/salesforce-flow-extension/dpeebajhbigfamnhmnlabecogegimodb
