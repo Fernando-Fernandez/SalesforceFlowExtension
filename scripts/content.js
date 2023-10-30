@@ -6,6 +6,8 @@
 
 const GETHOSTANDSESSION = "getHostSession";
 const TOOLING_API_VERSION = 'v57.0';
+const BUTTON_STYLE = "background-color: blueviolet!important; color: white!important; \
+margin-right: 30px; ";
 
 let sfHost, sessionId, flowDefinition;
 
@@ -48,15 +50,93 @@ function setFlowDefinitionFromToolingAPI( baseUrl, sessionId ) {
                     .then( ( response ) => response.json() )
                     .then( ( data ) => {
                         flowDefinition = data.Metadata;
-                        
-                        addHoverEvents();
+                        waitForFlowUI();
                     } );
 }
 
 let getNodesTimeout;
+function waitForFlowUI() {
+    // attempt to get list of flow nodes repeatedly, in both auto-layout and free-form modes
+    let flowShapes = document.querySelectorAll( 
+                        "div.node-container, span.text-element-label,div.start-node-box" );
+    if( flowShapes.length <= 0 ) {
+        // nodes not created, try again in 2 secs
+        getNodesTimeout = setTimeout( () => {
+            waitForFlowUI();
+        }, 2000 );
+        return;
+    }
+
+    clearTimeout( getNodesTimeout );
+
+    addHoverEvents();
+
+    addShowDefinitionButton();
+}
+
+function addShowDefinitionButton() {
+    // insert button before the combobox
+    let flowComboBox = document.querySelector( "lightning-combobox.slds-form-element" );
+    let showDefinitionButton = document.createElement( "button" );
+    showDefinitionButton.setAttribute( "class", "slds-button slds-button_neutral" );
+    showDefinitionButton.setAttribute( "style", BUTTON_STYLE );
+    showDefinitionButton.innerText = "View Definition";
+    flowComboBox.parentElement.insertBefore( showDefinitionButton, flowComboBox );
+
+    showDefinitionButton.addEventListener( "click", function() { 
+        showDefinition( showDefinitionButton ); 
+    } );
+}
+
+let instantiationTimer;
+function showDefinition( showDefinitionButton ) {
+
+    let flowIframe = document.getElementById( "flowIframe" );
+
+    if( ! flowIframe ) {
+        let flowContainer = document.querySelector( 
+                            "div.slds-col.slds-grow.slds-grid.slds-is-relative.slds-scrollable_none" );
+        // append iframe
+        let popupSrc = chrome.runtime.getURL( "popup.html" );
+        flowIframe = document.createElement( "iframe" );
+        flowIframe.setAttribute( "id", "flowIframe" );
+        flowIframe.style.position = "absolute";
+        flowIframe.style.top = "5px";
+        flowIframe.style.left = "5px";
+        flowIframe.style.zIndex = "999";
+        flowIframe.setAttribute( "width", flowContainer.offsetWidth - 10 );
+        flowIframe.setAttribute( "height", flowContainer.offsetHeight - 10 );
+        // flowIframe.style.marginLeft = "5rem";
+        flowIframe.src = popupSrc;
+        flowContainer.appendChild( flowIframe );
+
+        flowIframe.style.display = "block";
+        showDefinitionButton.innerText = "Hide Definition";
+
+    } else {
+        if( flowIframe.style.display == "none" ) {
+            flowIframe.style.display = "block";
+            showDefinitionButton.innerText = "Hide Definition";
+
+        } else {
+            // hide flow iframe if visible
+            flowIframe.style.display = "none";
+            showDefinitionButton.innerText = "View Definition";
+            return;
+        }
+    }
+
+    // wait for the iframe to load and then send the flow definition to it
+    instantiationTimer = setTimeout( () => {
+        clearTimeout( instantiationTimer );
+        chrome.runtime.sendMessage( { flowDefinition } );
+    }, 1000 );
+}
+
 function addHoverEvents() {
     // attempt to get list of flow nodes repeatedly, in both auto-layout and free-form modes
-    let flowShapes = document.querySelectorAll( "div.node-container, span.text-element-label,div.start-node-box" );
+    let flowShapes = document.querySelectorAll( 
+                        "div.node-container, span.text-element-label,div.start-node-box" );
     if( flowShapes.length <= 0 ) {
         // nodes not created, try again in 2 secs
         getNodesTimeout = setTimeout( () => {
@@ -177,7 +257,9 @@ function indexElementsAndReturnDescription( definitionMap ) {
     let descriptionArray = [];
 
     // follow the flow element sequence and create descriptions at relevant points
-    let startingElement = flowDefinition.startElementReference ?? flowDefinition.start.connector.targetReference;
+    let startingElement = flowDefinition.startElementReference ?? 
+                            flowDefinition.start?.connector?.targetReference ?? 
+                            flowDefinition.start?.scheduledPaths[ 0 ].connector?.targetReference;
     let currentNode = nodeMap.get( startingElement );
     let lastDecisionNode, lastDecisionNodeWithPendingBranches;
     let lastScreenNode;
@@ -329,10 +411,10 @@ function createTooltip( {
 
     arrow = document.createElement( "div" );
     const distanceX = 200, distanceY = 10; // auto-layout should result in top -65, left 50 (with width 350)
-    arrow.setAttribute( "style", "width: " + distanceX + "px; height: 25px; "
-                    + "background-color: darkgray; z-index: 998; position: relative;" 
-                    + "clip-path: polygon(0% 50%, 15px 0%, 15px 47%, 100% 47%, 100% 53%, 15px 53%, 15px 100% ); "
-                    + "top: " + ( topPos - arrowYDistance ) + "px; left: " + ( leftPos - distanceX ) + "px;" );
+    arrow.setAttribute( "style", "width: " + distanceX + "px; height: 25px; \
+background-color: darkgray; z-index: 998; position: relative; \
+clip-path: polygon(0% 50%, 15px 0%, 15px 47%, 100% 47%, 100% 53%, 15px 53%, 15px 100% ); \
+top: " + ( topPos - arrowYDistance ) + "px; left: " + ( leftPos - distanceX ) + "px;" );
     currentTarget.parentNode.appendChild( arrow );
 }
 
@@ -373,8 +455,8 @@ function displayTooltip( event, displayFlag ) {
 
     // tooltip on the start flow element
     const isStartElement = event.currentTarget.className === 'start-node-box'
-                || ( autoLayout 
-                    && event.currentTarget.children[ 0 ].children[ 1 ].children[ 1 ].innerText == 'Start' );
+            || ( autoLayout 
+                && event.currentTarget.children[ 0 ].children[ 1 ].children[ 1 ].innerText == 'Start' );
 
     if( isStartElement ) {
         let descriptionArray = indexElementsAndReturnDescription( definitionMap );
@@ -454,11 +536,25 @@ function displayTooltip( event, displayFlag ) {
     }
 
     // add field assignments if creating record
-    node.inputAssignments?.forEach( aField => {
-        let assignDescription = ( aField.field ?? aField.name ) + ' = ' + getValue( aField.value );
-        let assignmentNode = document.createTextNode( assignDescription );
-        appendNodeAndLine( assignmentNode );
-    } );
+    if( node.inputAssignments && node.inputAssignments.length > 0 ) {
+        let inputHeader = document.createTextNode( "Input Assignments:  " );
+        appendNodeAndLine( inputHeader );
+        node.inputAssignments?.forEach( aField => {
+            let assignDescription = ( aField.field ?? aField.name ) + ' = ' + getValue( aField.value );
+            let assignmentNode = document.createTextNode( assignDescription );
+            appendNodeAndLine( assignmentNode );
+        } );
+    }
+
+    if( node.outputAssignments && node.outputAssignments.length > 0 ) {
+        let outputHeader = document.createTextNode( "Output Assignments:  " );
+        appendNodeAndLine( outputHeader );
+        node.outputAssignments?.forEach( aField => {
+            let assignDescription = ( aField.field ?? aField.name ) + ' = ' + getValue( aField.value );
+            let assignmentNode = document.createTextNode( assignDescription );
+            appendNodeAndLine( assignmentNode );
+        } );
+    }
     
     // add fields if screen element
     node.fields?.forEach( aField => {
@@ -471,15 +567,15 @@ function displayTooltip( event, displayFlag ) {
 
         if( aField.fieldType === "ComponentInstance" ) {
             fieldText = aField.inputParameters?.reduce( ( accumulator, currentValue ) => 
-                                                    accumulator + getValue( currentValue.value ) + ", "
-                                                    , "" );
+                                            accumulator + getValue( currentValue.value ) + ", "
+                                            , "" );
             fieldText = ( fieldText !== "" ? fieldText : aField.name ?? aField.extensionName );
         }
 
         if( ! fieldText ) {
             fieldText = aField.outputParameters?.reduce( ( accumulator, currentValue ) => 
-                                        accumulator + " / " + getValue( currentValue ) + " = " + currentValue.name
-                                        , "" );
+                            accumulator + " / " + getValue( currentValue ) + " = " + currentValue.name
+                            , "" );
             if( fieldText.length > 2 ) {
                 fieldText = fieldText.substring( 2 );
             }
@@ -498,15 +594,14 @@ function displayTooltip( event, displayFlag ) {
             let paramNode = document.createTextNode( paramDescription );
             appendNodeAndLine( paramNode );
         } );
-        
     };
 
     // describe collection processors
     if( node.collectionProcessorType ) {
         let type = ( node.collectionProcessorType == 'SortCollectionProcessor' ? 'Sort'
-                : node.collectionProcessorType == 'FilterCollectionProcessor' ? 'Filter'
-                : node.collectionProcessorType == 'RecommendationMapCollectionProcessor' ? 'Recommendation Map' 
-                : '' );
+            : node.collectionProcessorType == 'FilterCollectionProcessor' ? 'Filter'
+            : node.collectionProcessorType == 'RecommendationMapCollectionProcessor' ? 'Recommendation Map' 
+            : '' );
         let typeNode = document.createTextNode( `Type:  ${type}` );
         appendNodeAndLine( typeNode );
         let sortOptions = node.sortOptions?.reduce( ( accumulator, currentValue ) => 
@@ -539,29 +634,50 @@ function displayTooltip( event, displayFlag ) {
         let targetOfAction = document.createTextNode( 'Object:  ' + node.object );
         appendNodeAndLine( targetOfAction );
     }
+    if( node.assignNullValuesIfNoRecordsFound ) {
+        let assignNull = document.createTextNode( 'Assign null if no records:  ' + node.assignNullValuesIfNoRecordsFound );
+        appendNodeAndLine( assignNull );
+    }
+    if( node.getFirstRecordOnly ) {
+        let only1Record = document.createTextNode( 'Only first record:  ' + node.getFirstRecordOnly );
+        appendNodeAndLine( only1Record );
+    }
+    if( node.assignRecordIdToReference ) {
+        let assignId = document.createTextNode( 'Assign record id to:  ' + node.assignRecordIdToReference );
+        appendNodeAndLine( assignId );
+    }
     if( node.inputReference ) {
         let theInput = document.createTextNode( 'Input:  ' + node.inputReference );
         appendNodeAndLine( theInput );
     }
-    if( node.type == 'recordCreates' ) {
-        let theAction = document.createTextNode( 'Action:  Record Creation' );
+    let recordOperationType = ( node.type == 'recordCreates' ? 'Creation' :
+                                node.type == 'recordUpdates' ? 'Update' :
+                                node.type == 'recordLookups' ? 'Lookup' : 
+                                node.type == 'recordDeletes' ? 'Delete' : 
+                                null );
+    if( recordOperationType ) {
+        let theAction = document.createTextNode( `Action:  Record ${recordOperationType}` );
         appendNodeAndLine( theAction );
     }
 
     // add filters if lookup
-    node.filters?.forEach( anItem => {
-        let fieldsNode = document.createTextNode( anItem.field 
-                                                + " " + ( anItem.operator == "EqualTo" ? "=" : anItem.operator ) + " "
-                                                + getValue( anItem.value ) );
-        appendNodeAndLine( fieldsNode );
-    } );
+    if( node.filters && node.filters.length > 0 ) {
+        let filterHeader = document.createTextNode( `Filters: ` );
+        appendNodeAndLine( filterHeader );
+        node.filters?.forEach( anItem => {
+            let fieldsNode = document.createTextNode( anItem.field 
+                                            + " " + ( anItem.operator == "EqualTo" ? "=" : anItem.operator ) + " "
+                                            + getValue( anItem.value ) );
+            appendNodeAndLine( fieldsNode );
+        } );
+    }
 
     // add fields if assignment
     node.assignmentItems?.forEach( anItem => {
         let fieldsNode = document.createTextNode( anItem.assignToReference 
-                                                + " " + ( anItem.operator == "Assign" ? "=" : "" )
-                                                + ( anItem.operator == "Add" ? "appended with" : "" ) + " "
-                                                + getValue( anItem.value ) );
+                                        + " " + ( anItem.operator == "Assign" ? "=" : "" )
+                                        + ( anItem.operator == "Add" ? "appended with" : "" ) + " "
+                                        + getValue( anItem.value ) );
         appendNodeAndLine( fieldsNode );
     } );
 
