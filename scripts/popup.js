@@ -1,11 +1,12 @@
 const KEY = 'hashedKey';
 const DEFAULT_PROMPT = `Your purpose is to help everyone quickly understand \
 what this Salesforce flow does and how.\
-Please think step by step and briefly summarize the flow in the format: \
+Let us think step-by-step and briefly summarize the flow in the format: \
 purpose of the flow, the main objects queried/inserted/updated, \
 any dependencies from outside the flow (labels, hard-coded ids, values, emails, names, etc), \
 the main conditions it evaluates, and any potential or evident issues.\
 \\nFLOW: \\n`;
+const ELEMENT_TYPE_START = 'start';
 
 chrome.runtime.onMessage.addListener(
     function( request, sender, sendResponse ) {
@@ -90,132 +91,149 @@ function getStoreOutput( action ) {
     return '';
 }
 
-function parseFlow( flowDefinition ) {
-    // console.log( flowDefinition );
+function getParameters( action ) {
+    let parameters = '';
+    let elementType = action.type;
 
-    let flowName = 'Flow:  ' + flowDefinition.label;
-    let flowDescription = flowDefinition.description;
-
-    // identify initial step
-    let startElement = flowDefinition.startElementReference ?? flowDefinition.start?.connector?.targetReference;
-
-    let actionMap = new Map();
-    let firstElement = flowDefinition.start;
-    if( ! firstElement ) {
-        firstElement = { connector: { targetReference: startElement } };
-    }
-    firstElement.name = 'Start';
-    firstElement.type = 'start';
-    firstElement.branchArray = [];
-    actionMap.set( firstElement.name, firstElement );
-
-    // collect nodes in the flow metadata and index them in a map
-    const definitionMap = new Map( [
-        [ 'recordLookups', flowDefinition.recordLookups ]
-        , [ 'recordCreates', flowDefinition.recordCreates ]
-        , [ 'recordUpdates', flowDefinition.recordUpdates ]
-        , [ 'recordDeletes', flowDefinition.recordDeletes ]
-        , [ 'recordRollbacks', flowDefinition.recordRollbacks ]
-        , [ 'assignments', flowDefinition.assignments ]
-        , [ 'decisions', flowDefinition.decisions ]
-        , [ 'screens', flowDefinition.screens ]
-        , [ 'loops', flowDefinition.loops ]
-        , [ 'steps', flowDefinition.steps ]
-        , [ 'subflows', flowDefinition.subflows ]
-        , [ 'actionCalls', flowDefinition.actionCalls ]
-        , [ 'apexPluginCalls', flowDefinition.apexPluginCalls ]
-        , [ 'collectionProcessors', flowDefinition.collectionProcessors ]
-        , [ 'transforms', flowDefinition.transforms ]
-        , [ 'waits', flowDefinition.waits ]
-        , [ 'dynamicChoiceSets', flowDefinition.dynamicChoiceSets ]
-        , [ 'variables', flowDefinition.variables ]
-        , [ 'textTemplates', flowDefinition.textTemplates ]
-        , [ 'constants', flowDefinition.constants ]
-        , [ 'choices', flowDefinition.choices ]
-    ] );
-
-    // reorganize flow elements into a single map indexed by name
-    for( const [ typeName, array ] of definitionMap ) {
-        if( array && array.length <= 0 ) {
-            continue;
+    if( elementType == ELEMENT_TYPE_START ) {
+        let type = action.triggerType + ' ' + action.recordTriggerType;
+        parameters += `Type = ${type}`;
+        parameters += ` / Object = ${action.object}`;
+        parameters += ` / Requires Record Changed To Meet Criteria = ${action.doesRequireRecordChangedToMeetCriteria}`;
+        parameters += getFilters( action );
+        if( action.filterFormula ) {
+            parameters += ` / Filter formula = ${action.filterFormula}`;
         }
-        for( let i = 0; i < array.length; i++ ) {
-            let element = array[ i ];
-            element.type = typeName.substring( 0, typeName.length - 1 );
-            element.branchArray = [];
-            actionMap.set( element.name, element );
+        if( action.schedule ) {
+            parameters += ` / Schedule = ${action.schedule.startDate} ${action.schedule.startTime} ${action.schedule.frequency}`;
         }
     }
 
-    // loop through map to find and list the branches of execution
+    if( elementType == 'assignment' ) {
+        parameters += getFieldOperations( action.assignmentItems );
+    }
+
+    if( elementType == 'variable' ) {
+        let type = ( action.isCollection ? 'Collection of ' : '' ) + action.dataType;
+        parameters += `Type = ${type}`;
+        parameters += ` / Input = ${action.isInput}`;
+        parameters += ` / Output = ${action.isOutput}`;
+        parameters += ` / Value = ${parseValue( action.value )}`;
+    }
+
+    if( elementType == 'constant' ) {
+        parameters += `Type = ${action.dataType}`;
+        parameters += ` / Value = ${parseValue( action.value )}`;
+    }
+
+    if( elementType == 'textTemplate' ) {
+        let text = action.text.replaceAll( '<', '&lt;' ).replaceAll( '>', '&gt;' );
+        parameters += `Text = ${text}`;
+        parameters += ` / Plain Text = ${action.isViewedAsPlainText}`;
+    }
+
+    if( elementType == 'formula' ) {
+        parameters += `Type = ${action.dataType}`;
+        parameters += ` / Expression = ${expression}`;
+    }
+
+    if( elementType == 'choice' ) {
+        parameters += `Text = ${action.choiceText}`;
+        parameters += ` / Type = ${action.dataType}`;
+        parameters += ` / Value = ${parseValue( action.value )}`;
+    }
+
+    if( elementType == 'collectionProcessor' ) {
+        parameters += `Collection = ${action.collectionReference}`;
+        parameters += ` / Processing type = ${action.collectionProcessorType}`;
+        parameters += ` / Assign next value to = ${action.assignNextValueToReference}`;
+        parameters += ` / Filter formula = ${action.formula}`;
+        parameters += ` / Output object = ${action.outputSObjectType}`;
+        parameters += getFieldOperations( action.conditions );
+    }
+
+    if( elementType == 'dynamicChoiceSet' ) {
+        parameters += `Collection = ${action.collectionReference}`;
+        parameters += ` / Type = ${action.dataType}`;
+        parameters += ` / Object = ${action.object}`;
+        parameters += ` / Picklist object = ${action.picklistObject}`;
+        parameters += ` / Picklist field = ${action.picklistField}`;
+        parameters += ` / Display field = ${action.displayField}`;
+    }
+
+    if( elementType == 'actionCall' ) {
+        parameters += `Type = ${action.actionType}`;
+        parameters += getStoreOutput( action );
+        parameters += addInputOutputParameters( action );
+    }
+
+    if( elementType == 'apexPluginCalls' ) {
+        parameters += `Apex class = ${action.apexClass}`;
+        parameters += addInputOutputParameters( action );
+    }
+
+    if( elementType == 'subflows' ) {
+        parameters += `Flow = ${action.flowName}`;
+        parameters += getStoreOutput( action );
+        parameters += addInputOutputParameters( action );
+    }
+
+    if( elementType == 'recordLookup' ) {
+        parameters += `Object = ${action.object}`;
+        parameters += ` / Assign null if no records? = ${action.assignNullValuesIfNoRecordsFound}`;
+        parameters += ` / First record only? = ${action.getFirstRecordOnly}`;
+        parameters += getStoreOutput( action );
+        parameters += getFieldOperations( action.filters );
+    }
+
+    if( elementType == 'recordCreate' ) {
+        parameters += `Object = ${action.object}`;
+        parameters += ` / Assign id? = ${action.assignRecordIdToReference}`;
+        parameters += getStoreOutput( action );
+        parameters += addInputOutputParameters( action );
+    }
+
+    if( elementType == 'recordUpdate' ) {
+        parameters += `Reference = ${action.inputReference}`;
+        if( action.object ) {
+            parameters += ` / Object = ${action.object}`;
+        }
+        parameters += addInputOutputParameters( action );
+        parameters += getFieldOperations( action.filters );
+    }
+
+    if( elementType == 'recordDelete' ) {
+        parameters += `Reference = ${action.inputReference}`;
+        if( action.object ) {
+            parameters += ` / Object = ${action.object}`;
+        }
+        parameters += getFieldOperations( action.filters );
+    }
+
+    if( elementType == 'screen' ) {
+        action.fields.forEach( f => {
+            parameters += ` / ${f.fieldText ?? ''} ${f.dataType ?? ''} ${f.fieldType ?? ''} ${f.objectFieldReference ?? ''}`;
+        });
+    }
+
+    if( elementType == 'loop' ) {
+        parameters += `Collection = ${action.collectionReference}`;
+        parameters += ` / Order = ${action.iterationOrder}`;
+    }
+
+    if( parameters.indexOf( ' / ' ) == 0 ) {
+        parameters = parameters.substring( 2 );
+    }
+
+    return parameters;
+}
+
+function getMDTableRows( actionMap ) {
+    let stepByStepMDTable = '';
     for( const [ identifier, action ] of actionMap ) {
         let elementType = action.type;
-
-        let nextElement = action.connector?.targetReference;
-        if( nextElement == undefined ) {
-            nextElement = action.defaultConnector?.targetReference;
-        }
-        if( nextElement != undefined ) {
-            action.branchArray.push( nextElement );
-        }
-
-        let faultElement = action.faultConnector?.targetReference;
-        if( faultElement ) {
-            action.branchArray.push( faultElement );
-        }
-
-        // handle elements with multiple rows
-        if( elementType == 'start' ) {
-            action.scheduledPaths?.forEach( s => {
-                let nextElement = s.connector?.targetReference;
-                action.branchArray.push( nextElement );
-            } );
-            continue;
-        }
-
-        if( elementType == 'loop' ) {
-            action.branchArray.push( action.nextValueConnector?.targetReference );
-            action.branchArray.push( action.noMoreValuesConnector?.targetReference );
-
-            continue;
-        }
-
-        if( elementType == 'wait' ) {
-            action.waitEvents?.forEach( w => {
-                nextElement = w.connector?.targetReference;
-                action.branchArray.push( nextElement );
-            } );
-            continue;
-        }
-
-        // check for rule conditions
-        if( action.rules != undefined && action.rules.length > 0 ) {
-            action.rules?.forEach( r => {
-                action.branchArray.push( rule.connector?.targetReference );
-            } );
-        }
-    }
-
-    // assign sequential index to elements, following all their branches recursively
-    index = 0;
-    let currentElement = actionMap.get( firstElement.name );
-    assignIndexToElements( actionMap, currentElement );
-
-    // sort elements by index so that table will be ordered by execution
-    actionMap = new Map( [ ...actionMap.entries() ].sort( ( a, b ) => a[ 1 ].index - b[ 1 ].index ) );
-
-    // generate itemized description of the flow
-    let stepByStepMDTable = `${flowName}\nDescription: ${flowDescription}\nType: ${flowDefinition.processType}\n\n`
-                        + '|Element name|Type|Parameters|Condition|Condition next element|\n'
-                        + '|-|-|-|-|-|-|\n';
-    for( const [ identifier, action ] of actionMap ) {
-        let elementDescription = action.name 
-                                + parenthesis( action.label ) 
-                                + ( action.description ? ' / ' + action.description : '' );
-        let elementType = action.type;
-
-        let defaultCondition = ( elementType != 'variable' 
-                                && elementType != 'textTemplate' ? 'success' : '' );
+        let faultElement = action.faultElement;
+        let parameters = action.parameters;
 
         let nextElement = action.connector?.targetReference;
         if( nextElement == undefined ) {
@@ -225,144 +243,10 @@ function parseFlow( flowDefinition ) {
             nextElement = '';
         }
 
-        let faultElement = action.faultConnector?.targetReference;
-
-        let parameters = '';
-
-        if( elementType == 'start' ) {
-            let type = action.triggerType + ' ' + action.recordTriggerType;
-            parameters += `Type = ${type}`;
-            parameters += ` / Object = ${action.object}`;
-            parameters += ` / Requires Record Changed To Meet Criteria = ${action.doesRequireRecordChangedToMeetCriteria}`;
-            parameters += getFilters( action );
-            if( action.filterFormula ) {
-                parameters += ` / Filter formula = ${action.filterFormula}`;
-            }
-            if( action.schedule ) {
-                parameters += ` / Schedule = ${action.schedule.startDate} ${action.schedule.startTime} ${action.schedule.frequency}`;
-            }
-        }
-
-        if( elementType == 'assignment' ) {
-            parameters += getFieldOperations( action.assignmentItems );
-        }
-
-        if( elementType == 'variable' ) {
-            let type = ( action.isCollection ? 'Collection of ' : '' ) + action.dataType;
-            parameters += `Type = ${type}`;
-            parameters += ` / Input = ${action.isInput}`;
-            parameters += ` / Output = ${action.isOutput}`;
-            parameters += ` / Value = ${parseValue( action.value )}`;
-        }
-
-        if( elementType == 'constant' ) {
-            parameters += `Type = ${action.dataType}`;
-            parameters += ` / Value = ${parseValue( action.value )}`;
-        }
-
-        if( elementType == 'textTemplate' ) {
-            let text = action.text.replaceAll( '<', '&lt;' ).replaceAll( '>', '&gt;' );
-            parameters += `Text = ${text}`;
-            parameters += ` / Plain Text = ${action.isViewedAsPlainText}`;
-        }
-
-        if( elementType == 'formula' ) {
-            parameters += `Type = ${action.dataType}`;
-            parameters += ` / Expression = ${expression}`;
-        }
-
-        if( elementType == 'choice' ) {
-            parameters += `Text = ${action.choiceText}`;
-            parameters += ` / Type = ${action.dataType}`;
-            parameters += ` / Value = ${parseValue( action.value )}`;
-        }
-
-        if( elementType == 'collectionProcessor' ) {
-            parameters += `Collection = ${action.collectionReference}`;
-            parameters += ` / Processing type = ${action.collectionProcessorType}`;
-            parameters += ` / Assign next value to = ${action.assignNextValueToReference}`;
-            parameters += ` / Filter formula = ${action.formula}`;
-            parameters += ` / Output object = ${action.outputSObjectType}`;
-            parameters += getFieldOperations( action.conditions );
-        }
-
-        if( elementType == 'dynamicChoiceSet' ) {
-            parameters += `Collection = ${action.collectionReference}`;
-            parameters += ` / Type = ${action.dataType}`;
-            parameters += ` / Object = ${action.object}`;
-            parameters += ` / Picklist object = ${action.picklistObject}`;
-            parameters += ` / Picklist field = ${action.picklistField}`;
-            parameters += ` / Display field = ${action.displayField}`;
-        }
-
-        if( elementType == 'actionCall' ) {
-            parameters += `Type = ${action.actionType}`;
-            parameters += getStoreOutput( action );
-            parameters += addInputOutputParameters( action );
-        }
-
-        if( elementType == 'apexPluginCalls' ) {
-            parameters += `Apex class = ${action.apexClass}`;
-            parameters += addInputOutputParameters( action );
-        }
-
-        if( elementType == 'subflows' ) {
-            parameters += `Flow = ${action.flowName}`;
-            parameters += getStoreOutput( action );
-            parameters += addInputOutputParameters( action );
-        }
-
-        if( elementType == 'recordLookup' ) {
-            parameters += `Object = ${action.object}`;
-            parameters += ` / Assign null if no records? = ${action.assignNullValuesIfNoRecordsFound}`;
-            parameters += ` / First record only? = ${action.getFirstRecordOnly}`;
-            parameters += getStoreOutput( action );
-            parameters += getFieldOperations( action.filters );
-        }
-
-        if( elementType == 'recordCreate' ) {
-            parameters += `Object = ${action.object}`;
-            parameters += ` / Assign id? = ${action.assignRecordIdToReference}`;
-            parameters += getStoreOutput( action );
-            parameters += addInputOutputParameters( action );
-        }
-
-        if( elementType == 'recordUpdate' ) {
-            parameters += `Reference = ${action.inputReference}`;
-            if( action.object ) {
-                parameters += ` / Object = ${action.object}`;
-            }
-            parameters += addInputOutputParameters( action );
-            parameters += getFieldOperations( action.filters );
-        }
-
-        if( elementType == 'recordDelete' ) {
-            parameters += `Reference = ${action.inputReference}`;
-            if( action.object ) {
-                parameters += ` / Object = ${action.object}`;
-            }
-            parameters += getFieldOperations( action.filters );
-        }
-
-        if( elementType == 'screen' ) {
-            action.fields.forEach( f => {
-                parameters += ` / ${f.fieldText ?? ''} ${f.dataType ?? ''} ${f.fieldType ?? ''} ${f.objectFieldReference ?? ''}`;
-            });
-        }
-
-        if( elementType == 'loop' ) {
-            parameters += `Collection = ${action.collectionReference}`;
-            parameters += ` / Order = ${action.iterationOrder}`;
-        }
-
-        if( parameters.indexOf( ' / ' ) == 0 ) {
-            parameters = parameters.substring( 2 );
-        }
-
-        let prefix = `|${elementDescription}|${elementType}|${ parameters }|`;
+        let prefix = `|${action.fullDescription}|${elementType}|${ parameters }|`;
 
         // handle elements with multiple rows
-        if( elementType == 'start' ) {
+        if( elementType == ELEMENT_TYPE_START ) {
             stepByStepMDTable += `${prefix}Runs immediately|${ nextElement }|\n`;
             prefix = '||||';
             if( action.scheduledPaths ) {
@@ -378,9 +262,8 @@ function parseFlow( flowDefinition ) {
         }
 
         if( elementType == 'decision' ) {
-            defaultCondition = action.defaultConnectorLabel;
             nextElement = action.defaultConnector?.targetReference;
-            stepByStepMDTable += `${prefix}${defaultCondition}|${ nextElement }|\n`;
+            stepByStepMDTable += `${prefix}${action.defaultCondition}|${ nextElement }|\n`;
             prefix = '||||';
         }
 
@@ -411,7 +294,7 @@ function parseFlow( flowDefinition ) {
                 nextElement += ' ' + parenthesis( action.defaultConnectorLabel );
             }
             // if no conditions, just add the default condition
-            stepByStepMDTable += `${prefix}${defaultCondition}|${ nextElement }|\n`;
+            stepByStepMDTable += `${prefix}${action.defaultCondition}|${ nextElement }|\n`;
 
             if( faultElement ) {
                 prefix = '||||';
@@ -433,7 +316,136 @@ function parseFlow( flowDefinition ) {
         }
     }
 
-    createTableFromMarkDown( stepByStepMDTable );
+    return stepByStepMDTable;
+}
+
+function parseFlow( flowDefinition ) {
+    // console.log( flowDefinition );
+
+    let flowName = 'Flow:  ' + flowDefinition.label;
+    let flowDescription = flowDefinition.description;
+
+
+    // identify initial step
+    let startElement = flowDefinition.startElementReference ?? flowDefinition.start?.connector?.targetReference;
+
+    let firstElement = flowDefinition.start;
+    if( ! firstElement ) {
+        firstElement = { connector: { targetReference: startElement } };
+    }
+    firstElement.name = 'Start';
+    firstElement.fullDescription = firstElement.name;
+    firstElement.type = ELEMENT_TYPE_START;
+    firstElement.branchArray = [];
+    firstElement.parameters = getParameters( firstElement );
+    
+    firstElement.scheduledPaths?.forEach( s => {
+        firstElement.branchArray.push( s.connector?.targetReference );
+    } );
+
+    // start map of actions indexed by name with the starting element
+    let actionMap = new Map();
+    actionMap.set( firstElement.name, firstElement );
+
+    // collect nodes in the flow metadata and index them in a map
+    const definitionMap = new Map( [
+        [ 'recordLookups', flowDefinition.recordLookups ]
+        , [ 'recordCreates', flowDefinition.recordCreates ]
+        , [ 'recordUpdates', flowDefinition.recordUpdates ]
+        , [ 'recordDeletes', flowDefinition.recordDeletes ]
+        , [ 'recordRollbacks', flowDefinition.recordRollbacks ]
+        , [ 'assignments', flowDefinition.assignments ]
+        , [ 'decisions', flowDefinition.decisions ]
+        , [ 'screens', flowDefinition.screens ]
+        , [ 'loops', flowDefinition.loops ]
+        , [ 'steps', flowDefinition.steps ]
+        , [ 'subflows', flowDefinition.subflows ]
+        , [ 'actionCalls', flowDefinition.actionCalls ]
+        , [ 'apexPluginCalls', flowDefinition.apexPluginCalls ]
+        , [ 'collectionProcessors', flowDefinition.collectionProcessors ]
+        , [ 'transforms', flowDefinition.transforms ]
+        , [ 'waits', flowDefinition.waits ]
+        , [ 'dynamicChoiceSets', flowDefinition.dynamicChoiceSets ]
+        , [ 'variables', flowDefinition.variables ]
+        , [ 'textTemplates', flowDefinition.textTemplates ]
+        , [ 'constants', flowDefinition.constants ]
+        , [ 'choices', flowDefinition.choices ]
+    ] );
+
+    // reorganize flow elements into a single map indexed by name
+    for( const [ typeName, array ] of definitionMap ) {
+        if( ! array || array.length <= 0 ) {
+            continue;
+        }
+        for( let i = 0; i < array.length; i++ ) {
+            let element = array[ i ];
+            element.type = typeName.substring( 0, typeName.length - 1 );
+
+            element.fullDescription = element.name 
+                                    + parenthesis( element.label ) 
+                                    + ( element.description ? ' / ' + element.description : '' );
+
+            element.defaultCondition = ( element.type == 'variable' 
+                                            || element.type == 'textTemplate' ? '' :
+                            ( element.type == 'decision' ? element.defaultConnectorLabel : 'success' ) );
+
+            element.nextElement = ( element.connector?.targetReference != undefined ? 
+                                        element.connector?.targetReference : 
+                                        element.defaultConnector?.targetReference );
+            
+            // list the branches of execution
+            element.branchArray = [];
+            if( element.nextElement != undefined ) {
+                element.branchArray.push( element.nextElement );
+            }
+
+            if( element.faultConnector?.targetReference ) {
+                element.faultElement = element.faultConnector?.targetReference;
+                element.branchArray.push( element.faultElement );
+            }
+
+            if( element.type == 'loop' ) {
+                element.branchArray.push( element.nextValueConnector?.targetReference );
+                element.branchArray.push( element.noMoreValuesConnector?.targetReference );
+            }
+
+            if( element.type == 'wait' ) {
+                element.waitEvents?.forEach( w => {
+                    element.branchArray.push( w.connector?.targetReference );
+                } );
+            }
+            
+            if( element.rules != undefined && element.rules.length > 0 ) {
+                element.rules?.forEach( r => {
+                    element.branchArray.push( r.connector?.targetReference );
+                } );
+            }
+
+            // create explanation containing parameters of the element
+            element.parameters = getParameters( element );
+
+            actionMap.set( element.name, element );
+        }
+    }
+
+    // assign sequential index to elements, following all their branches recursively
+    index = 0;
+    let currentElement = actionMap.get( firstElement.name );
+    assignIndexToElements( actionMap, currentElement );
+
+    // sort elements by index so that table will be ordered by execution
+    actionMap = new Map( [ ...actionMap.entries() ].sort( ( a, b ) => a[ 1 ].index - b[ 1 ].index ) );
+
+    // generate itemized description of the flow
+    let stepByStepMDTable = `${flowName}\nDescription: ${flowDescription}\nType: ${flowDefinition.processType}\n\n`
+                        + '|Element name|Type|Parameters|Condition|Condition next element|\n'
+                        + '|-|-|-|-|-|-|\n';
+    stepByStepMDTable += getMDTableRows( actionMap );
+
+    createTableFromMarkDown( actionMap, stepByStepMDTable );
+
+    // let csvFlow = getCSVFromMarkDown( stepByStepMDTable );
+    // console.log( csvFlow );
 
     // prepare to call OpenAI
     const spinner = document.getElementById( "spinner" );
@@ -467,12 +479,23 @@ function parseFlow( flowDefinition ) {
     let dataObject = { 
         currentURL: window.location.href, 
         resultData: stepByStepMDTable, 
+        // resultData: csvFlow,
         prompt: DEFAULT_PROMPT
     };
     sendToGPT( dataObject, openAIKey );
 }
 
-function createTableFromMarkDown( stepByStepMDTable ) {
+// function getCSVFromMarkDown( stepByStepMDTable ) {
+//     let table = stepByStepMDTable
+//                         .replaceAll( "|\n|-|-|-|-|-|-|\n|", "\"\n\"" )
+//                         .replaceAll( "\n|", "\n\"" )
+//                         .replaceAll( "|\n", "\"\n" )
+//                         .replaceAll( "|", "\",\"" )
+//                         .replaceAll( " / ", "\n" );
+//     return table;
+// }
+
+function createTableFromMarkDown( actionMap, stepByStepMDTable ) {
     let addAnchorFunction = function ( entireMatch, capturedStr ) {
         let spaceIndex = capturedStr.indexOf(' ');
         let name = ( spaceIndex > 0 ? capturedStr.substring( 0, spaceIndex ) : capturedStr );
@@ -518,7 +541,7 @@ let index = 0;
 function assignIndexToElements( actionMap, currentElement ) {
     index++;
     currentElement.index = index;
-    console.log( index, currentElement.name );
+    // console.log( index, currentElement.name );
 
     // check all branches flowing from the current element
     let nbrBranches = currentElement.branchArray.length;
@@ -552,6 +575,17 @@ function setKey() {
     errorSpan.innerText = "An AI explanation should appear here the next time you open this page.";
 }
 
+function verySimpleHash( data ) {
+    let hash = 0;
+    for( let i = 0, len = data.length; i < len; i++ ) {
+        let chr = data.charCodeAt( i );
+        hash = ( hash << 5 ) - hash + chr;
+        hash |= 0;
+    }
+    return hash;
+}
+
+const CACHE_DURATION = 300000; // 5 min
 function sendToGPT( dataObject, openAIKey ) {
     const spinner = document.getElementById( "spinner" );
     const responseSpan = document.getElementById( "response" );
@@ -571,15 +605,26 @@ function sendToGPT( dataObject, openAIKey ) {
             return;
         }
 
+        // scan cache for clean up
+        Object.keys( sessionStorage ).forEach( aKey => {
+            let parsedCachedResponse = JSON.parse( sessionStorage.getItem( aKey ) );
+
+            // if older than cache limit
+            let cacheAgeMs = Math.abs( Date.now() - parsedCachedResponse?.cachedDate );
+            if( cacheAgeMs >= CACHE_DURATION ) {
+                sessionStorage.removeItem( aKey );
+            }
+        } );
+
         // attempt to retrieve previously stored response
-        const cacheKey = JSON.stringify( { currentURL, resultData, prompt } );
+        const cacheKey = verySimpleHash( currentURL ); // JSON.stringify( { currentURL, resultData, prompt } );
         const cachedResponse = sessionStorage.getItem( cacheKey );
         if( cachedResponse != null && cachedResponse != undefined ) {
             let parsedCachedResponse = JSON.parse( cachedResponse );
 
-            // only use cached response if newer than 5 min
+            // only use cached response if newer than cache limit
             let cacheAgeMs = Math.abs( Date.now() - parsedCachedResponse?.cachedDate );
-            if( cacheAgeMs < 300000 ) {
+            if( cacheAgeMs < CACHE_DURATION ) {
                 // display response 
                 responseSpan.innerText = 'OpenAI (cached response): ' + parsedCachedResponse.parsedResponse;
                 spinner.style.display = "none";
@@ -594,7 +639,8 @@ function sendToGPT( dataObject, openAIKey ) {
         let frequency_penalty = 0;
         let presence_penalty = 0;
         let model = 'gpt-3.5-turbo';
-        let systemPrompt = 'You are an expert at troubleshooting and explaining Amazon Connect flows.';  // was 'You are a helpful assistant.';
+        let systemPrompt = 'You are an expert at troubleshooting and explaining Salesforce flows.';
+        // was 'You are a helpful assistant.';
 
         // replace characters that would invalidate the JSON payload‘
         let data = //`Current page URL ${currentURL}\\n` +
