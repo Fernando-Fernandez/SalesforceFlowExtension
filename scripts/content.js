@@ -80,7 +80,7 @@ function addShowDefinitionButton() {
     let showDefinitionButton = document.createElement( "button" );
     showDefinitionButton.setAttribute( "class", "slds-button slds-button_neutral" );
     showDefinitionButton.setAttribute( "style", BUTTON_STYLE );
-    showDefinitionButton.innerText = "View Definition";
+    showDefinitionButton.innerText = "View Definition (Flow Extension)";
     flowComboBox.parentElement.insertBefore( showDefinitionButton, flowComboBox );
 
     showDefinitionButton.addEventListener( "click", function() { 

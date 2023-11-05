@@ -3,7 +3,7 @@ const DEFAULT_PROMPT = `Your purpose is to help everyone quickly understand \
 what this Salesforce flow does and how.\
 Let us think step-by-step and briefly summarize the flow in the format: \
 purpose of the flow, the main objects queried/inserted/updated, \
-any dependencies from outside the flow (labels, hard-coded ids, values, emails, names, etc), \
+dependencies (labels, hard-coded ids, values, emails, names, etc) from outside the flow, \
 the main conditions it evaluates, and any potential or evident issues.\
 \\nFLOW: \\n`;
 const ELEMENT_TYPE_START = 'start';
@@ -338,6 +338,10 @@ function parseFlow( flowDefinition ) {
     firstElement.type = ELEMENT_TYPE_START;
     firstElement.branchArray = [];
     firstElement.parameters = getParameters( firstElement );
+
+    if( firstElement.connector?.targetReference ) {
+        firstElement.branchArray.push( firstElement.connector?.targetReference );
+    }
     
     firstElement.scheduledPaths?.forEach( s => {
         firstElement.branchArray.push( s.connector?.targetReference );
@@ -395,29 +399,36 @@ function parseFlow( flowDefinition ) {
             
             // list the branches of execution
             element.branchArray = [];
+            element.branchLabelArray = [];
             if( element.nextElement != undefined ) {
                 element.branchArray.push( element.nextElement );
+                element.branchLabelArray.push( `${element.label} is true` );
             }
 
             if( element.faultConnector?.targetReference ) {
                 element.faultElement = element.faultConnector?.targetReference;
                 element.branchArray.push( element.faultElement );
+                element.branchLabelArray.push( `fails on ${element.label}` );
             }
 
             if( element.type == 'loop' ) {
                 element.branchArray.push( element.nextValueConnector?.targetReference );
+                element.branchLabelArray.push( `next value on ${element.label}` );
                 element.branchArray.push( element.noMoreValuesConnector?.targetReference );
+                element.branchLabelArray.push( `no more values on ${element.label}` );
             }
 
             if( element.type == 'wait' ) {
                 element.waitEvents?.forEach( w => {
                     element.branchArray.push( w.connector?.targetReference );
+                    element.branchLabelArray.push( `wait event ${w.label}` );
                 } );
             }
-            
+
             if( element.rules != undefined && element.rules.length > 0 ) {
                 element.rules?.forEach( r => {
                     element.branchArray.push( r.connector?.targetReference );
+                    element.branchLabelArray.push( `condition ${r.label} on ${element.label}` );
                 } );
             }
 
@@ -431,10 +442,56 @@ function parseFlow( flowDefinition ) {
     // assign sequential index to elements, following all their branches recursively
     index = 0;
     let currentElement = actionMap.get( firstElement.name );
-    assignIndexToElements( actionMap, currentElement );
+    assignIndexToElements( actionMap, currentElement, currentElement, 'start' );
 
     // sort elements by index so that table will be ordered by execution
     actionMap = new Map( [ ...actionMap.entries() ].sort( ( a, b ) => a[ 1 ].index - b[ 1 ].index ) );
+
+    // TODO:  generate explanation by associating outcomes with decisions/branches
+    let explanation = '';
+    for( const [ identifier, action ] of actionMap ) {
+        let elementType = action.type;
+        let parentBranch = action.parentBranch;
+        let parentBranchAction = '';
+        if( parentBranch != undefined ) {
+            parentBranchAction = ( parentBranch.type == 'decision' ? 'after checking' : '' )
+                                + ( parentBranch.type == 'start' ? 'at the' : '' )
+                                + ( parentBranch.type == 'loop' ? 'when loop has' : '' )
+                                + ( parentBranch.type == 'actionCall' ? 'after calling action' : '' )
+                                + ( parentBranch.type == 'wait' ? 'after event' : '' );
+        }
+        let conditionExplained = `${parentBranchAction ?? ''} ${action.conditionLabel ?? ''}`;
+
+        if( elementType === 'recordCreate'
+                || elementType === 'recordUpdate'
+                || elementType === 'recordDelete'
+                || elementType === 'recordRollback' ) {
+            let recordAction = elementType.replace( 'record', '' ).toLowerCase() + 's';
+            explanation += ` \n ${recordAction} ${action.object ?? action.inputReference} ${conditionExplained}`;
+        }
+        if( elementType === 'recordLookup' ) {
+            explanation += ` \n queries ${action.object} ${conditionExplained}`;
+        }
+        // if( elementType === 'assignment' ) {
+        //     explanation += ` \n assigns ${action.label} ${conditionExplained}`;
+        // }
+        if( elementType === 'actionCall' ) {
+            explanation += ` \n calls action ${action.label} ${conditionExplained}`;
+        }
+        if( elementType === 'screen' ) {
+            explanation += ` \n prompts screen ${action.label} ${conditionExplained}`;
+        }
+
+        // let parameters = action.parameters;
+    }
+    // console.log( explanation );
+
+    // display default explanation
+    let explainerDivElement = document.getElementById( 'defaultExplainer' );
+    explainerDivElement.innerHTML = "";
+    let explanationHTML = document.createElement( 'span' );
+    explanationHTML.innerHTML = '<b>This flow:  </b>' + explanation.replaceAll( /\n/g, '<br />' );
+    explainerDivElement.appendChild( explanationHTML );
 
     // generate itemized description of the flow
     let stepByStepMDTable = `${flowName}\nDescription: ${flowDescription}\nType: ${flowDefinition.processType}\n\n`
@@ -448,41 +505,72 @@ function parseFlow( flowDefinition ) {
     // console.log( csvFlow );
 
     // prepare to call OpenAI
-    const spinner = document.getElementById( "spinner" );
-    spinner.style.display = "inline-block";
     let responseSpan = document.getElementById( "response" );
     responseSpan.innerText = '';
 
     const errorSpan = document.getElementById( "error" );
     let storedKey = localStorage.getItem( KEY );
     if( ! storedKey ) {
+        const spinner = document.getElementById( "spinner" );
         spinner.style.display = "none";
         responseSpan.innerText = '';
         errorSpan.innerText = "Please set an OpenAI key to get an AI explanation.";
         return;
     }
 
-    // extract OpenAI key
-    let encodedKey = JSON.parse( storedKey );
-    let keyArray = [];
-    Object.keys( encodedKey ).forEach( idx => keyArray.push( encodedKey[ idx ] ) );
-    let intArray = new Uint8Array( keyArray );
-    let dec = new TextDecoder();
-    let openAIKey = dec.decode( intArray );
+    // since we have OpenAI key, display button to call it
+    let flowExplainer = document.getElementById( 'flowExplainer' );
+    flowExplainer.innerHTML = "";
+    let gptQuestionLabel = document.createElement( 'label' );
+    gptQuestionLabel.innerText = 'Ask your question or leave blank for default prompt:';
+    gptQuestionLabel.setAttribute( 'for', 'gptQuestion' );
+    let gptQuestion = document.createElement( 'input' );
+    gptQuestion.setAttribute( 'id', 'gptQuestion' );
+    let gptButton = document.createElement( 'button' );
+    gptButton.innerHTML = 'Ask GPT';
 
-    if( ! openAIKey ) {
-        return;
-    }
+    let gptDialogContainer = document.createElement( 'div' );
+    gptDialogContainer.appendChild( gptQuestionLabel );
+    gptDialogContainer.appendChild( gptQuestion );
+    gptDialogContainer.appendChild( gptButton );
+    flowExplainer.appendChild( gptDialogContainer );
+    
+    // make button call GPT 
+    gptButton.addEventListener( 'click', () => {
+        const spinner = document.getElementById( "spinner" );
+        spinner.style.display = "inline-block";
 
-    responseSpan.innerText = 'Asking GPT to explain current flow...';
+        // extract OpenAI key
+        let encodedKey = JSON.parse( storedKey );
+        let keyArray = [];
+        Object.keys( encodedKey ).forEach( idx => keyArray.push( encodedKey[ idx ] ) );
+        let intArray = new Uint8Array( keyArray );
+        let dec = new TextDecoder();
+        let openAIKey = dec.decode( intArray );
 
-    let dataObject = { 
-        currentURL: window.location.href, 
-        resultData: stepByStepMDTable, 
-        // resultData: csvFlow,
-        prompt: DEFAULT_PROMPT
-    };
-    sendToGPT( dataObject, openAIKey );
+        if( ! openAIKey ) {
+            return;
+        }
+
+        responseSpan.innerText = 'Asking GPT to explain current flow...';
+
+        // accept user question, otherwise use default prompt
+        let prompt;
+        let gptQuestion = document.getElementById( 'gptQuestion' );
+        if( gptQuestion && gptQuestion.value ) {
+            prompt = gptQuestion.value + '\\nFLOW: \\n';
+        } else {
+            prompt = `This flow: ${explanation.replaceAll( /\n/g, '\\n' )} ` + DEFAULT_PROMPT;
+        }
+
+        let dataObject = { 
+            currentURL: window.location.href, 
+            resultData: stepByStepMDTable, 
+            // resultData: csvFlow,
+            prompt: prompt
+        };
+        sendToGPT( dataObject, openAIKey );
+    } );
 }
 
 // function getCSVFromMarkDown( stepByStepMDTable ) {
@@ -538,27 +626,51 @@ function createTableFromMarkDown( actionMap, stepByStepMDTable ) {
 }
 
 let index = 0;
-function assignIndexToElements( actionMap, currentElement ) {
+let forksArray = [];
+function assignIndexToElements( actionMap, currentElement, parentBranch, conditionLabel ) {
+    // assign order number to current element
     index++;
     currentElement.index = index;
     // console.log( index, currentElement.name );
 
+    // link element to parent branch it inherited
+    // so all elements will belong to a parent branch
+    let currentParentBranch = parentBranch;
+    let currentConditionLabel = conditionLabel;
+    currentElement.parentBranch = currentParentBranch;
+    currentElement.conditionLabel = currentConditionLabel;
+
     // check all branches flowing from the current element
     let nbrBranches = currentElement.branchArray.length;
+    if( nbrBranches > 1 ) {
+        // store current element if 2+ branches flow out of it
+        forksArray.push( currentElement );
+
+        // if current element is a branch, it will be 
+        // the parent branch of the next elements
+        currentParentBranch = currentElement;
+    }
     for( let i = 0; i < nbrBranches; i++ ) {
+        if( nbrBranches > 1 ) {
+            currentConditionLabel = currentElement.branchLabelArray[ i ];
+        }
+
+        // check next element in each branch
         let aBranch = currentElement.branchArray[ i ];
         if( aBranch == null || aBranch == undefined ) {
             continue;
         }
 
-        // if element has already been visited, skip it
-        branchElement = actionMap.get( aBranch );
-        if( branchElement.index ) {
+        // if element has index, then it has already been visited so skip it
+        let branchNextElement = actionMap.get( aBranch );
+        if( branchNextElement.index ) {
             continue;
         }
 
-        // continue in this branch, assigning index to elements, recursively
-        assignIndexToElements( actionMap, branchElement );
+        // continue in this branch, assigning index to elements, 
+        // recursively until all elements have indexes
+        assignIndexToElements( actionMap, branchNextElement 
+                            , currentParentBranch, currentConditionLabel );
     }
 }
 
@@ -617,7 +729,7 @@ function sendToGPT( dataObject, openAIKey ) {
         } );
 
         // attempt to retrieve previously stored response
-        const cacheKey = verySimpleHash( currentURL ); // JSON.stringify( { currentURL, resultData, prompt } );
+        const cacheKey = verySimpleHash( currentURL + prompt + resultData.substring( 0, 20 ) ); // JSON.stringify( { currentURL, resultData, prompt } );
         const cachedResponse = sessionStorage.getItem( cacheKey );
         if( cachedResponse != null && cachedResponse != undefined ) {
             let parsedCachedResponse = JSON.parse( cachedResponse );
