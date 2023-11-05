@@ -519,8 +519,8 @@ function parseFlow( flowDefinition ) {
     }
 
     // since we have OpenAI key, display button to call it
-    let flowExplainer = document.getElementById( 'flowExplainer' );
-    flowExplainer.innerHTML = "";
+    let gptInputs = document.getElementById( 'gptInputs' );
+    gptInputs.innerHTML = "";
     let gptQuestionLabel = document.createElement( 'label' );
     gptQuestionLabel.innerText = 'Ask your question or leave blank for default prompt:';
     gptQuestionLabel.setAttribute( 'for', 'gptQuestion' );
@@ -533,7 +533,7 @@ function parseFlow( flowDefinition ) {
     gptDialogContainer.appendChild( gptQuestionLabel );
     gptDialogContainer.appendChild( gptQuestion );
     gptDialogContainer.appendChild( gptButton );
-    flowExplainer.appendChild( gptDialogContainer );
+    gptInputs.appendChild( gptDialogContainer );
     
     // make button call GPT 
     gptButton.addEventListener( 'click', () => {
