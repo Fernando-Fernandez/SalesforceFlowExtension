@@ -134,7 +134,7 @@ function getParameters( action ) {
 
     if( elementType == 'formula' ) {
         parameters += `Type = ${action.dataType}`;
-        parameters += ` / Expression = ${expression}`;
+        parameters += ` / Expression = ${action.expression}`;
     }
 
     if( elementType == 'choice' ) {
@@ -372,6 +372,7 @@ function parseFlow( flowDefinition ) {
         , [ 'dynamicChoiceSets', flowDefinition.dynamicChoiceSets ]
         , [ 'variables', flowDefinition.variables ]
         , [ 'textTemplates', flowDefinition.textTemplates ]
+        , [ 'formulas', flowDefinition.formulas ]
         , [ 'constants', flowDefinition.constants ]
         , [ 'choices', flowDefinition.choices ]
     ] );
@@ -390,8 +391,9 @@ function parseFlow( flowDefinition ) {
                                     + ( element.description ? ' / ' + element.description : '' );
 
             element.defaultCondition = ( element.type == 'variable' 
-                                            || element.type == 'textTemplate' ? '' :
-                            ( element.type == 'decision' ? element.defaultConnectorLabel : 'success' ) );
+                                        || element.type == 'formula' 
+                                        || element.type == 'textTemplate' ? '' :
+                        ( element.type == 'decision' ? element.defaultConnectorLabel : 'success' ) );
 
             element.nextElement = ( element.connector?.targetReference != undefined ? 
                                         element.connector?.targetReference : 
@@ -496,10 +498,10 @@ function parseFlow( flowDefinition ) {
     // generate itemized description of the flow
     let stepByStepMDTable = `${flowName}\nDescription: ${flowDescription}\nType: ${flowDefinition.processType}\n\n`
                         + '|Element name|Type|Parameters|Condition|Condition next element|\n'
-                        + '|-|-|-|-|-|-|\n';
+                        + '|-|-|-|-|-|\n';
     stepByStepMDTable += getMDTableRows( actionMap );
 
-    createTableFromMarkDown( actionMap, stepByStepMDTable );
+    createTableFromMarkDown( flowName, actionMap, stepByStepMDTable );
 
     // let csvFlow = getCSVFromMarkDown( stepByStepMDTable );
     // console.log( csvFlow );
@@ -528,11 +530,17 @@ function parseFlow( flowDefinition ) {
     gptQuestion.setAttribute( 'id', 'gptQuestion' );
     let gptButton = document.createElement( 'button' );
     gptButton.innerHTML = 'Ask GPT';
+    let gptSelection = document.createElement( 'div' );
+    gptSelection.innerHTML += `<input type="radio" id="gptVersion" name="gpt-version" value="gpt-3.5-turbo" checked>
+        <label for="gpt-3.5-turbo">gpt-3.5-turbo</label>
+        <input type="radio" id="gpt-4o" name="gpt-version" value="gpt-4o">
+        <label for="gpt-4o">gpt-4o</label>`;
 
     let gptDialogContainer = document.createElement( 'div' );
     gptDialogContainer.appendChild( gptQuestionLabel );
     gptDialogContainer.appendChild( gptQuestion );
     gptDialogContainer.appendChild( gptButton );
+    gptDialogContainer.appendChild( gptSelection );
     gptInputs.appendChild( gptDialogContainer );
     
     // make button call GPT 
@@ -563,11 +571,14 @@ function parseFlow( flowDefinition ) {
             prompt = `This flow: ${explanation.replaceAll( /\n/g, '\\n' )} ` + DEFAULT_PROMPT;
         }
 
+        let gptModel = document.querySelector( 'input[name="gpt-version"]:checked' ).value;
+
         let dataObject = { 
             currentURL: window.location.href, 
             resultData: stepByStepMDTable, 
             // resultData: csvFlow,
-            prompt: prompt
+            prompt: prompt,
+            gptModel: gptModel
         };
         sendToGPT( dataObject, openAIKey );
     } );
@@ -583,7 +594,7 @@ function parseFlow( flowDefinition ) {
 //     return table;
 // }
 
-function createTableFromMarkDown( actionMap, stepByStepMDTable ) {
+function createTableFromMarkDown( flowName, actionMap, stepByStepMDTable ) {
     let addAnchorFunction = function ( entireMatch, capturedStr ) {
         let spaceIndex = capturedStr.indexOf(' ');
         let name = ( spaceIndex > 0 ? capturedStr.substring( 0, spaceIndex ) : capturedStr );
@@ -606,22 +617,48 @@ function createTableFromMarkDown( actionMap, stepByStepMDTable ) {
     flowTableContainer.setAttribute( "id", "flowTableContainer" );
 
     let table = '<br /><table id="flowTable"><thead>' + stepByStepMDTable
-                        .replaceAll( "|\n|-|-|-|-|-|-|\n|", "</td></tr></head><tbody><tr><td>" )
-                        .replaceAll( /(?:\|)([^|]+?)(?:\|\n)/gi, addLinkFunction )
-                        .replaceAll( "|\n", "</td></tr>" )
-                        .replaceAll( "</td></tr>|", "</td></tr>\n<tr><td>" )
-                        .replaceAll( "\n|", "<tr><td>" )
-                        .replaceAll( "|", "</td><td>" )
-                        .replaceAll( /(?:<tr><td>)(.+?)(?:<\/td>)/gi, addAnchorFunction )
-                        .replaceAll( " / ", "<br />" )
-                        .replaceAll( "<td> <br /> ", "<td>" )
-                        .replaceAll( 'Flow:', '<span style="font-weight: bold;">Flow:</span>' )
-                        .replaceAll( '\nDescription:', '\n<br /><span style="font-weight: bold;">Description:</span>' )
-                         + '</tbody></table><br />';
+                .replaceAll( "|\n|-|-|-|-|-|\n|", "</td></tr></head><tbody><tr><td>" )
+                .replaceAll( /(?:\|)([^|]+?)(?:\|\n)/gi, addLinkFunction )
+                .replaceAll( "|\n", "</td></tr>" )
+                .replaceAll( "</td></tr>|", "</td></tr>\n<tr><td>" )
+                .replaceAll( "\n|", "<tr><td>" )
+                .replaceAll( "|", "</td><td>" )
+                .replaceAll( /(?:<tr><td>)(.+?)(?:<\/td>)/gi, addAnchorFunction )
+                .replaceAll( " / ", "<br />" )
+                .replaceAll( "<td> <br /> ", "<td>" )
+                .replaceAll( 'Flow:', '<span style="font-weight: bold;">Flow:</span>' )
+                .replaceAll( '\nDescription:', '\n<br /><span style="font-weight: bold;">Description:</span>' )
+                    + '</tbody></table><br />';
     flowTableContainer.innerHTML = table;
+
+    // create download MarkDown link
+    let downloadButton = document.createElement( 'button' );
+    downloadButton.innerHTML = 'Download Flow Definition in MarkDown Format';
+    // downloadButton.style = 'background-color: blueviolet!important; color: white!important; ';
+    downloadButton.addEventListener( 'click', () => {
+        // create blob with markdown for download
+        let markDownDescription = new Blob( [stepByStepMDTable], { type: 'text/markdown' } );
+        const url = URL.createObjectURL( markDownDescription );
+        const anchor = document.createElement( 'a' );
+        anchor.href = url;
+        anchor.download = flowName.replace( 'Flow:  ', '' ) + ' - flowDefinition.md';
+    
+        // Append to the DOM
+        document.body.appendChild( anchor );
+    
+        // Trigger `click` event
+        anchor.click();
+    
+        // Remove element from DOM
+        document.body.removeChild( anchor );
+
+        // release memory from file
+        URL.revokeObjectURL( url );
+    } );
 
     // add table to the document
     let flowDivElement = document.getElementById( 'flow' );
+    flowDivElement.appendChild( downloadButton );
     flowDivElement.appendChild( flowTableContainer );
 }
 
@@ -709,7 +746,7 @@ function sendToGPT( dataObject, openAIKey ) {
             return;
         }
 
-        let { currentURL, resultData, prompt } = dataObject;
+        let { currentURL, resultData, prompt, gptModel } = dataObject;
 
         if( ! resultData ) {
             responseSpan.innerText = 'No data to send.';
@@ -747,10 +784,10 @@ function sendToGPT( dataObject, openAIKey ) {
         // use parameters recommended for Code Comment Generation
         let temperature = 0.3;  // was 1;
         let top_p = 0.2; // was 1;
-        let max_tokens = 900; // was 256 
+        let max_tokens = 2000; // was 256 then 900
         let frequency_penalty = 0;
         let presence_penalty = 0;
-        let model = 'gpt-3.5-turbo';
+        let model = ( gptModel ? gptModel : 'gpt-3.5-turbo' );
         let systemPrompt = 'You are an expert at troubleshooting and explaining Salesforce flows.';
         // was 'You are a helpful assistant.';
 
@@ -761,18 +798,20 @@ function sendToGPT( dataObject, openAIKey ) {
                                 .replaceAll( '\t', ' ' ).replaceAll( '   ', ' ' );
 
         // check size of data and select a bigger model as needed
-        if( data.length > 3900 ) {
-            // TODO:  check if bigger than 32600 and pick gpt-4-32k
+        if( data.length > 16200 ) {
 
-            model = 'gpt-3.5-turbo-16k';
+            model = 'gpt-4o'; // 'gpt-3.5-turbo-16k';
             // truncate data as needed
-            if( data.length > 16200 ) {
-                data = data.substring( 0, 16200 );
+            if( data.length > 130872 ) {
+                data = data.substring( 0, 130872 );
             }
         }
 
         // build prompt with current page data in a request
-        let payload = `{ "model":"${model}","messages":[{"role":"system","content":"${systemPrompt}"},{"role":"user","content":"${prompt} ${data}"}],"temperature": ${temperature},"max_tokens":${max_tokens},"top_p":${top_p},"frequency_penalty":${frequency_penalty},"presence_penalty":${presence_penalty} }`;
+        // let payload = `{ "model":"${model}","messages":[{"role":"system","content":"${systemPrompt}"},{"role":"user","content":"${prompt} ${data}"}],"temperature": ${temperature},"max_tokens":${max_tokens},"top_p":${top_p},"frequency_penalty":${frequency_penalty},"presence_penalty":${presence_penalty} }`;
+        let sysMessage = `{"role":"system","content":[{"type":"text","text":"${systemPrompt}"}]}`;
+        let userMessage = `{"role":"user","content":[{"type":"text","text":"${prompt} ${data}"}]}`;
+        let payload = `{ "model":"${model}","messages":[${sysMessage},${userMessage}],"temperature": ${temperature},"max_tokens":${max_tokens},"top_p":${top_p},"frequency_penalty":${frequency_penalty},"presence_penalty":${presence_penalty} }`;
 
         // prepare request
         let url = "https://api.openai.com/v1/chat/completions";
