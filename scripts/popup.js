@@ -143,6 +143,21 @@ function getParameters( action ) {
         parameters += ` / Value = ${parseValue( action.value )}`;
     }
 
+    if( elementType == 'transform' ) {
+        parameters += ` \n Target = ${ action.objectType ?? action.dataType }`;
+
+        action.transformValues?.forEach( aTransformValue => {
+            aTransformValue?.transformValueActions.forEach( aTransformAction => {
+                let aValue = parseValue( aTransformAction.value );
+                let transformDescription = aTransformAction.transformType + ': ' 
+                            + ( aValue !== 'null' ? aValue : 'formula' )
+                            + ( aTransformAction.outputFieldApiName ? ' to ' + aTransformAction.outputFieldApiName : '' );
+                parameters += ` / ${transformDescription}`;
+            } );
+        } );
+    }
+
+
     if( elementType == 'collectionProcessor' ) {
         parameters += `Collection = ${action.collectionReference}`;
         parameters += ` / Processing type = ${action.collectionProcessorType}`;
@@ -484,6 +499,10 @@ function parseFlow( flowDefinition ) {
             explanation += ` \n prompts screen ${action.label} ${conditionExplained}`;
         }
 
+        if( elementType == 'transform' ) {
+            explanation += ` \n transforms ${ action.objectType ?? action.dataType }`;
+        }
+
         // let parameters = action.parameters;
     }
     // console.log( explanation );
@@ -531,10 +550,11 @@ function parseFlow( flowDefinition ) {
     let gptButton = document.createElement( 'button' );
     gptButton.innerHTML = 'Ask GPT';
     let gptSelection = document.createElement( 'div' );
-    gptSelection.innerHTML += `<input type="radio" id="gptVersion" name="gpt-version" value="gpt-3.5-turbo" checked>
-        <label for="gpt-3.5-turbo">gpt-3.5-turbo</label>
-        <input type="radio" id="gpt-4o" name="gpt-version" value="gpt-4o">
-        <label for="gpt-4o">gpt-4o</label>`;
+    gptSelection.innerHTML += `
+        <input type="radio" id="gpt-4o" name="gpt-version" value="gpt-4o" checked>
+        <label for="gpt-4o">gpt-4o</label>
+        <input type="radio" id="gptVersion" name="gpt-version" value="gpt-3.5-turbo" >
+        <label for="gpt-3.5-turbo">gpt-3.5-turbo</label>`;
 
     let gptDialogContainer = document.createElement( 'div' );
     gptDialogContainer.appendChild( gptQuestionLabel );
@@ -853,7 +873,8 @@ function sendToGPT( dataObject, openAIKey ) {
                                         );
 
                 // display response 
-                responseSpan.innerText = 'OpenAI: ' + parsedResponse;
+                responseSpan.innerText = parsedResponse;
+                convertResponseFromMarkdown();
                 spinner.style.display = "none";
             }
         };
@@ -863,4 +884,16 @@ function sendToGPT( dataObject, openAIKey ) {
         responseSpan.innerText = e.message;
         spinner.style.display = "none";
     }
+}
+
+function convertResponseFromMarkdown() {
+    const span = document.getElementById( "response" );
+    let response = span.innerHTML;
+
+    // Replace **text** with <b>text</b>
+    response = response.replace(/\*\*(.*?)\*\*/g, "<b>$1</b>");
+    // Replace ### Heading with <h4>Heading</h4>
+    response = response.replace(/### (.*?)(<br>|$)/gm, "<h4>$1</h4>$2");
+
+    span.innerHTML = response;
 }

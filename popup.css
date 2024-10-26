@@ -1,0 +1,82 @@
+@media print {
+    @page {size: landscape}
+    button {
+      display: none;
+    }
+    #flow {
+        border: none!important;
+    }
+}
+#flow {
+    width: 100%; 
+    height: 90vh; 
+    overflow: auto; 
+    border: 1px solid lightgray;
+}
+BODY {
+    background-color: white;
+}
+
+H4 {
+    margin-block-start: 0;
+    margin-block-end: 0;
+}
+
+#main {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+}
+
+#flowTableContainer {
+    font-size: medium !important;
+}
+
+#flowTable {
+    border: solid 1px gray;
+    border-collapse: collapse!important;
+    width: 95%;
+}
+
+#flowTable THEAD {
+    background-color: darkslategray;
+    color: white;
+    font-weight: bold;
+    text-align: center;
+    vertical-align: middle;
+    text-transform: uppercase;
+}
+
+#flowTable TD {
+    border: solid 1px lightgray;
+    padding: 8px;
+}
+
+#flowTable TBODY TD:first-child {
+    background-color: lightgray;
+    font-weight: bold;
+    text-align: center;
+}
+
+#flowTable TBODY TD:nth-child(4), #flowTable TBODY TD:nth-child(6) {
+    text-align: center;
+}
+
+.lds-dual-ring {
+    animation: rotation 3s infinite linear;
+    font-size: xx-large;
+    display: none;
+}
+@keyframes rotation {
+    from {
+        transform-origin: 50% 50%;
+        transform: rotate(0deg);
+    }
+    to {
+        transform-origin: 50% 50%;
+        transform: rotate(359deg);
+    }
+}
+
+.smallText {
+    font-size: x-small;
+}

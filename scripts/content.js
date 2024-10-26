@@ -253,7 +253,7 @@ function indexElementsAndReturnDescription( definitionMap ) {
 
     // find a record create/update/delete and trace back to a decision or screen
     let relevantTypesSet = new Set( [ 'recordCreates', 'recordUpdates', 'recordDeletes', 'actionCalls'
-                            , 'subflows' ] );
+                            , 'subflows', 'recordLookups' ] );
     let descriptionArray = [];
 
     // follow the flow element sequence and create descriptions at relevant points
@@ -444,6 +444,7 @@ function displayTooltip( event, displayFlag ) {
         , [ 'recordUpdates', flowDefinition.recordUpdates ]
         , [ 'recordDeletes', flowDefinition.recordDeletes ]
         , [ 'recordLookups', flowDefinition.recordLookups ]
+        , [ 'transforms', flowDefinition.transforms ]
         , [ 'decisions', flowDefinition.decisions ]
         , [ 'subflows', flowDefinition.subflows ]
         , [ 'screens', flowDefinition.screens ]
@@ -456,6 +457,7 @@ function displayTooltip( event, displayFlag ) {
     // tooltip on the start flow element
     const isStartElement = event.currentTarget.className === 'start-node-box'
             || ( autoLayout 
+                && event.currentTarget.children[ 0 ].children[ 1 ].children[ 1 ]
                 && event.currentTarget.children[ 0 ].children[ 1 ].children[ 1 ].innerText == 'Start' );
 
     if( isStartElement ) {
@@ -533,6 +535,35 @@ function displayTooltip( event, displayFlag ) {
             appendNodeAndLine( subflowNode );
         }
     } catch( e ) {
+    }
+
+    // handle elementSubtype
+    try {
+        let elementSubtype = node.elementSubtype;
+        if( elementSubtype ) {
+            let subTypeNode = document.createTextNode( `(${elementSubtype})` );
+            appendNodeAndLine( subTypeNode );
+        }
+    } catch( e ) {
+    }
+
+    // handle transforms
+    if( node.type == 'transforms' ) {
+        let dataType = node.dataType;
+        let objectType = node.objectType;
+        let dataTypeNode = document.createTextNode( `(${ objectType ?? dataType })` );
+        appendNodeAndLine( dataTypeNode );
+
+        node.transformValues?.forEach( aTransformValue => {
+            aTransformValue?.transformValueActions.forEach( aTransformAction => {
+                let aValue = getValue( aTransformAction.value );
+                let transformDescription = aTransformAction.transformType + ': ' 
+                            + ( aValue ? aValue : 'formula' )
+                            + ( aTransformAction.outputFieldApiName ? ' to ' + aTransformAction.outputFieldApiName : '' );
+                let transformNode = document.createTextNode( transformDescription );
+                appendNodeAndLine( transformNode );
+            } );
+        } );
     }
 
     // add field assignments if creating record
