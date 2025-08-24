@@ -715,7 +715,7 @@ class FlowParser {
 
         // make button call GPT
         dom.gptButton.addEventListener( 'click', () => {
-    debugger;
+
             dom.spinner.style.display = "inline-block";
 
             // extract OpenAI key

@@ -1,3 +1,4 @@
 sampleFlow.json
 *.txt
 .sfdx
+cert/*.*
