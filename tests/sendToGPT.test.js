@@ -17,7 +17,7 @@ describe('sendToGPT Function', () => {
 
   // Mock DOM elements
   let mockSpinner, mockResponseSpan;
-  let mockXHR;
+  let mockFetch;
 
   beforeEach(() => {
     // Reset mocks
@@ -34,17 +34,15 @@ describe('sendToGPT Function', () => {
       return null;
     });
 
-    // Mock XMLHttpRequest
-    mockXHR = {
-      open: jest.fn(),
-      setRequestHeader: jest.fn(),
-      send: jest.fn(),
-      readyState: 4,
-      status: 200,
-      responseText: '{"choices":[{"message":{"content":"Test response"},"finish_reason":"stop"}]}',
-      onreadystatechange: null
-    };
-    global.XMLHttpRequest = jest.fn(() => mockXHR);
+    // Mock fetch
+    mockFetch = jest.fn(() =>
+      Promise.resolve({
+        ok: true,
+        status: 200,
+        text: () => Promise.resolve('{"choices":[{"message":{"content":"Test response"},"finish_reason":"stop"}]}'),
+      })
+    );
+    global.fetch = mockFetch;
 
     // Mock console.log
     console.log = jest.fn();
@@ -171,52 +169,56 @@ describe('sendToGPT Function', () => {
       let payload = JSON.stringify(payloadParams);
 
       // Make request
-      let xhr = new XMLHttpRequest();
-      xhr.open("POST", url);
-      xhr.setRequestHeader("Content-Type", "application/json");
-      xhr.setRequestHeader("Authorization", "Bearer " + openAIKey);
+      fetch(url, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": "Bearer " + openAIKey
+        },
+        body: payload
+      })
+      .then(response => response.text())
+      .then(open_ai_response => {
+        let parsedResponse = JSON.parse(open_ai_response);
 
-      xhr.onreadystatechange = function () {
-        if (xhr.readyState === 4) {
-          let open_ai_response = xhr.responseText;
-          let parsedResponse = JSON.parse(open_ai_response);
+        console.log(parsedResponse.usage);
 
-          console.log(parsedResponse.usage);
-
-          if (parsedResponse.error) {
-            parsedResponse = parsedResponse.error.message + ` (${parsedResponse.error.type})`;
-          } else if (isGPT5Model) {
-            if (parsedResponse.output?.content?.text) {
-              let responseText = parsedResponse.output.content.text;
-              if (parsedResponse.status === 'incomplete' && parsedResponse.incomplete_details?.reason === 'max_tokens') {
-                responseText = responseText + ' (RESPONSE TRUNCATED DUE TO LIMIT)';
-              }
-              parsedResponse = responseText;
-            } else {
-              parsedResponse = 'No response content received from GPT-5 model';
+        if (parsedResponse.error) {
+          parsedResponse = parsedResponse.error.message + ` (${parsedResponse.error.type})`;
+        } else if (isGPT5Model) {
+          if (parsedResponse.output?.content?.text) {
+            let responseText = parsedResponse.output.content.text;
+            if (parsedResponse.status === 'incomplete' && parsedResponse.incomplete_details?.reason === 'max_tokens') {
+              responseText = responseText + ' (RESPONSE TRUNCATED DUE TO LIMIT)';
             }
+            parsedResponse = responseText;
           } else {
-            let finishReason = parsedResponse.choices[0].finish_reason;
-            parsedResponse = parsedResponse.choices[0].message.content;
-            if (finishReason == 'length') {
-              parsedResponse = parsedResponse + ' (RESPONSE TRUNCATED DUE TO LIMIT)';
-            }
+            parsedResponse = 'No response content received from GPT-5 model';
           }
-
-          // Cache response
-          const cacheKey = JSON.stringify({ currentURL, resultData, prompt });
-          sessionStorage.setItem(cacheKey, JSON.stringify({
-            cachedDate: Date.now(),
-            parsedResponse
-          }));
-
-          // Display response
-          responseSpan.innerText = parsedResponse;
-          spinner.style.display = "none";
+        } else {
+          let finishReason = parsedResponse.choices[0].finish_reason;
+          parsedResponse = parsedResponse.choices[0].message.content;
+          if (finishReason == 'length') {
+            parsedResponse = parsedResponse + ' (RESPONSE TRUNCATED DUE TO LIMIT)';
+          }
         }
-      };
 
-      xhr.send(payload);
+        // Cache response
+        const cacheKey = JSON.stringify({ currentURL, resultData, prompt });
+        sessionStorage.setItem(cacheKey, JSON.stringify({
+          cachedDate: Date.now(),
+          parsedResponse
+        }));
+
+        // Display response
+        responseSpan.innerText = parsedResponse;
+        spinner.style.display = "none";
+      })
+      .catch(error => {
+        console.error('Fetch error:', error);
+        responseSpan.innerText = error.message;
+        spinner.style.display = "none";
+      });
     } catch (e) {
       responseSpan.innerText = e.message;
       spinner.style.display = "none";
@@ -287,7 +289,7 @@ describe('sendToGPT Function', () => {
 
       expect(mockResponseSpan.innerText).toBe('OpenAI (cached response): Cached response content');
       expect(mockSpinner.style.display).toBe('none');
-      expect(mockXHR.send).not.toHaveBeenCalled();
+      expect(mockFetch).not.toHaveBeenCalled();
     });
 
     test('should not use expired cache', () => {
@@ -309,7 +311,7 @@ describe('sendToGPT Function', () => {
       sendToGPT(dataObject, 'test-key');
 
       expect(mockResponseSpan.innerText).toBe('Using gpt-4o...');
-      expect(mockXHR.send).toHaveBeenCalled();
+      expect(mockFetch).toHaveBeenCalled();
     });
 
     test('should clean up expired cache entries', () => {
@@ -422,11 +424,16 @@ describe('sendToGPT Function', () => {
 
       sendToGPT(dataObject, 'test-key');
 
-      expect(mockXHR.open).toHaveBeenCalledWith('POST', 'https://api.openai.com/v1/responses');
-      expect(mockXHR.setRequestHeader).toHaveBeenCalledWith('Content-Type', 'application/json');
-      expect(mockXHR.setRequestHeader).toHaveBeenCalledWith('Authorization', 'Bearer test-key');
+      expect(mockFetch).toHaveBeenCalledWith('https://api.openai.com/v1/responses', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer test-key'
+        },
+        body: expect.any(String)
+      });
       
-      const sentPayload = JSON.parse(mockXHR.send.mock.calls[0][0]);
+      const sentPayload = JSON.parse(mockFetch.mock.calls[0][1].body);
       expect(sentPayload.model).toBe('gpt-5-nano');
       expect(sentPayload.input).toContain('You are an expert at troubleshooting');
       expect(sentPayload.temperature).toBe(1);
@@ -444,9 +451,16 @@ describe('sendToGPT Function', () => {
 
       sendToGPT(dataObject, 'test-key');
 
-      expect(mockXHR.open).toHaveBeenCalledWith('POST', 'https://api.openai.com/v1/chat/completions');
+      expect(mockFetch).toHaveBeenCalledWith('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer test-key'
+        },
+        body: expect.any(String)
+      });
       
-      const sentPayload = JSON.parse(mockXHR.send.mock.calls[0][0]);
+      const sentPayload = JSON.parse(mockFetch.mock.calls[0][1].body);
       expect(sentPayload.model).toBe('gpt-4o');
       expect(sentPayload.messages).toHaveLength(2);
       expect(sentPayload.temperature).toBe(0.3);
@@ -457,10 +471,13 @@ describe('sendToGPT Function', () => {
   });
 
   describe('Response Handling', () => {
-    test('should handle successful GPT-5 response', () => {
-      mockXHR.responseText = JSON.stringify({
-        output: { content: { text: 'GPT-5 response content' } },
-        status: 'complete'
+    test('should handle successful GPT-5 response', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        text: () => Promise.resolve(JSON.stringify({
+          output: { content: { text: 'GPT-5 response content' } },
+          status: 'complete'
+        }))
       });
 
       const dataObject = {
@@ -472,20 +489,23 @@ describe('sendToGPT Function', () => {
 
       sendToGPT(dataObject, 'test-key');
       
-      // Simulate XHR response
-      mockXHR.onreadystatechange();
+      // Wait for promises to resolve
+      await new Promise(resolve => setTimeout(resolve, 0));
 
       expect(mockResponseSpan.innerText).toBe('GPT-5 response content');
       expect(mockSpinner.style.display).toBe('none');
     });
 
-    test('should handle successful standard model response', () => {
-      mockXHR.responseText = JSON.stringify({
-        choices: [{
-          message: { content: 'Standard model response' },
-          finish_reason: 'stop'
-        }],
-        usage: { total_tokens: 100 }
+    test('should handle successful standard model response', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        text: () => Promise.resolve(JSON.stringify({
+          choices: [{
+            message: { content: 'Standard model response' },
+            finish_reason: 'stop'
+          }],
+          usage: { total_tokens: 100 }
+        }))
       });
 
       const dataObject = {
@@ -497,18 +517,22 @@ describe('sendToGPT Function', () => {
 
       sendToGPT(dataObject, 'test-key');
       
-      mockXHR.onreadystatechange();
+      // Wait for promises to resolve
+      await new Promise(resolve => setTimeout(resolve, 0));
 
       expect(mockResponseSpan.innerText).toBe('Standard model response');
       expect(mockSpinner.style.display).toBe('none');
     });
 
-    test('should handle API error response', () => {
-      mockXHR.responseText = JSON.stringify({
-        error: {
-          message: 'Invalid API key',
-          type: 'authentication_error'
-        }
+    test('should handle API error response', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        text: () => Promise.resolve(JSON.stringify({
+          error: {
+            message: 'Invalid API key',
+            type: 'authentication_error'
+          }
+        }))
       });
 
       const dataObject = {
@@ -520,17 +544,21 @@ describe('sendToGPT Function', () => {
 
       sendToGPT(dataObject, 'test-key');
       
-      mockXHR.onreadystatechange();
+      // Wait for promises to resolve
+      await new Promise(resolve => setTimeout(resolve, 0));
 
       expect(mockResponseSpan.innerText).toBe('Invalid API key (authentication_error)');
       expect(mockSpinner.style.display).toBe('none');
     });
 
-    test('should handle truncated GPT-5 response', () => {
-      mockXHR.responseText = JSON.stringify({
-        output: { content: { text: 'Truncated response' } },
-        status: 'incomplete',
-        incomplete_details: { reason: 'max_tokens' }
+    test('should handle truncated GPT-5 response', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        text: () => Promise.resolve(JSON.stringify({
+          output: { content: { text: 'Truncated response' } },
+          status: 'incomplete',
+          incomplete_details: { reason: 'max_tokens' }
+        }))
       });
 
       const dataObject = {
@@ -542,17 +570,21 @@ describe('sendToGPT Function', () => {
 
       sendToGPT(dataObject, 'test-key');
       
-      mockXHR.onreadystatechange();
+      // Wait for promises to resolve
+      await new Promise(resolve => setTimeout(resolve, 0));
 
       expect(mockResponseSpan.innerText).toBe('Truncated response (RESPONSE TRUNCATED DUE TO LIMIT)');
     });
 
-    test('should handle truncated standard response', () => {
-      mockXHR.responseText = JSON.stringify({
-        choices: [{
-          message: { content: 'Truncated response' },
-          finish_reason: 'length'
-        }]
+    test('should handle truncated standard response', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        text: () => Promise.resolve(JSON.stringify({
+          choices: [{
+            message: { content: 'Truncated response' },
+            finish_reason: 'length'
+          }]
+        }))
       });
 
       const dataObject = {
@@ -564,7 +596,8 @@ describe('sendToGPT Function', () => {
 
       sendToGPT(dataObject, 'test-key');
       
-      mockXHR.onreadystatechange();
+      // Wait for promises to resolve
+      await new Promise(resolve => setTimeout(resolve, 0));
 
       expect(mockResponseSpan.innerText).toBe('Truncated response (RESPONSE TRUNCATED DUE TO LIMIT)');
     });
@@ -618,11 +651,11 @@ describe('sendToGPT Function', () => {
 
       sendToGPT(dataObject, 'test-key');
 
-      // Check that XHR send was called
-      expect(mockXHR.send).toHaveBeenCalled();
+      // Check that fetch was called
+      expect(mockFetch).toHaveBeenCalled();
       
-      if (mockXHR.send.mock.calls.length > 0) {
-        const sentPayload = JSON.parse(mockXHR.send.mock.calls[0][0]);
+      if (mockFetch.mock.calls.length > 0) {
+        const sentPayload = JSON.parse(mockFetch.mock.calls[0][1].body);
         const userMessage = sentPayload.messages[1].content[0].text;
         
         // Check that data sanitization occurred

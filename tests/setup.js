@@ -27,18 +27,15 @@ const sessionStorageMock = {
 };
 global.sessionStorage = sessionStorageMock;
 
-// Mock XMLHttpRequest
-const xhrMockClass = () => ({
-  open: jest.fn(),
-  send: jest.fn(),
-  setRequestHeader: jest.fn(),
-  readyState: 4,
-  status: 200,
-  responseText: '',
-  onreadystatechange: null,
-});
-
-global.XMLHttpRequest = jest.fn(() => xhrMockClass());
+// Mock fetch
+global.fetch = jest.fn(() =>
+  Promise.resolve({
+    ok: true,
+    status: 200,
+    text: () => Promise.resolve(''),
+    json: () => Promise.resolve({}),
+  })
+);
 
 // Mock console methods to avoid noise in tests
 global.console = {

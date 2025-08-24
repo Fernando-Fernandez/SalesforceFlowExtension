@@ -30,13 +30,7 @@ const CONFIG = {
     
     // System prompts and messages
     PROMPTS: {
-        default: `Your purpose is to help everyone quickly understand \\
-what this Salesforce flow does and how.\\
-Let us think step-by-step and briefly summarize the flow in the format: \\
-purpose of the flow, the main objects queried/inserted/updated, \\
-dependencies (labels, hard-coded ids, values, emails, names, etc) from outside the flow, \\
-the main conditions it evaluates, and any potential or evident issues.\\
-\\nFLOW: \\n`,
+        default: `Your purpose is to help everyone quickly understand what this Salesforce flow does and how. Let us think step-by-step and briefly summarize the flow in the format: \\npurpose of the flow, the main objects queried/inserted/updated, dependencies (labels, hard-coded ids, values, emails, names, etc) from outside the flow, the main conditions it evaluates, and any potential or evident issues.\\nFLOW: \\n`,
         system: 'You are an expert at troubleshooting and explaining Salesforce flows.',
         no_response: 'No response content received from GPT-5 model',
         response_truncated: ' (RESPONSE TRUNCATED DUE TO LIMIT)'
@@ -72,7 +66,6 @@ the main conditions it evaluates, and any potential or evident issues.\\
     
     // DOM and formatting
     UI: {
-        xhr_ready_state: 4,
         gpt5_response_path: {
             output_index: 1,
             content_index: 0
@@ -672,6 +665,7 @@ function parseFlow( flowDefinition ) {
     
     // make button call GPT 
     gptButton.addEventListener( 'click', () => {
+debugger;
         const spinner = document.getElementById( "spinner" );
         spinner.style.display = "inline-block";
 
@@ -915,11 +909,9 @@ function sendToGPT( dataObject, openAIKey ) {
         let presence_penalty = CONFIG.GPT_PARAMS.presence_penalty;
         let model = ( gptModel ? gptModel : CONFIG.GPT_PARAMS.default_model );
         let systemPrompt = CONFIG.PROMPTS.system;
-        // was 'You are a helpful assistant.';
 
         // replace characters that would invalidate the JSON payload‘
-        let data = //`Current page URL ${currentURL}\\n` +
-                    resultData.replaceAll( '\n', '\\n ' ).replaceAll( '"', '“' )
+        let data = resultData.replaceAll( '\n', '\\n ' ).replaceAll( '"', '“' )
                                 .replaceAll( '\'', '‘' ).replaceAll( '\\', '\\\\' )
                                 .replaceAll( '\t', ' ' ).replaceAll( '   ', ' ' );
 
@@ -949,16 +941,16 @@ function sendToGPT( dataObject, openAIKey ) {
         responseSpan.innerText = statusMessage;
 
         // Determine if model is GPT-5 and adjust parameters accordingly
-        let isGPT5Model = model.toLowerCase().startsWith('gpt-5')
+        let isMoreRecentModel = model.toLowerCase().startsWith('gpt-5')
                     || model.toLowerCase().includes('o4-mini');
-        let tokenLimitParam = isGPT5Model ? 'max_output_tokens' : 'max_tokens';
-        let modelTemperature = isGPT5Model ? CONFIG.MODELS.gpt5_temperature : temperature; // GPT-5 models only support temperature = 1
+        let tokenLimitParam = isMoreRecentModel ? 'max_output_tokens' : 'max_tokens';
+        let modelTemperature = isMoreRecentModel ? CONFIG.MODELS.gpt5_temperature : temperature; // GPT-5 models only support temperature = 1
         
         // Build different payload structures for GPT-5 vs other models
         let payloadParams;
         let url;
         
-        if (isGPT5Model) {
+        if (isMoreRecentModel) {
             // GPT-5 uses different endpoint and payload structure
             url = CONFIG.ENDPOINTS.gpt5;
             max_tokens = CONFIG.GPT_PARAMS.gpt5_max_tokens;
@@ -976,7 +968,10 @@ function sendToGPT( dataObject, openAIKey ) {
             let userMessage = `{"role":"user","content":[{"type":"text","text":"${prompt} ${data}"}]}`;
             payloadParams = {
                 model: model,
-                messages: [JSON.parse(sysMessage), JSON.parse(userMessage)],
+                messages: [
+                    JSON.parse(sysMessage), 
+                    JSON.parse(userMessage)
+                ],
                 temperature: modelTemperature,
                 [tokenLimitParam]: max_tokens,
                 top_p: top_p,
@@ -989,28 +984,24 @@ function sendToGPT( dataObject, openAIKey ) {
 
         console.log( payload );
 
-        // prepare request
-        let xhr = new XMLHttpRequest();
-        xhr.open( "POST", url );
-        xhr.setRequestHeader( "Content-Type", "application/json" );
-        xhr.setRequestHeader( "Authorization", "Bearer " + openAIKey );
-
-        // submit request and receive response
-        xhr.onreadystatechange = function () {
-            if( xhr.readyState !== CONFIG.UI.xhr_ready_state ) {
-                return;
-            }
-
-            let open_ai_response = xhr.responseText;
-            console.log( open_ai_response );
+        // prepare and send request
+        fetch(url, {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+                "Authorization": "Bearer " + openAIKey
+            },
+            body: payload
+        })
+        .then(response => response.text())
+        .then(open_ai_response => {
 
             let parsedResponse = JSON.parse( open_ai_response );
-
             console.log( parsedResponse );
 
             if( parsedResponse.error ) {
                 parsedResponse = parsedResponse.error.message + ` (${parsedResponse.error.type})`;
-            } else if (isGPT5Model) {
+            } else if (isMoreRecentModel) {
                 // Check finish reason for GPT-5 with proper guard clauses
                 let responseText = null;
                 
@@ -1058,10 +1049,14 @@ function sendToGPT( dataObject, openAIKey ) {
             responseSpan.innerText = parsedResponse;
             convertResponseFromMarkdown();
             spinner.style.display = "none";
-        };
-
-        xhr.send( payload );
+        })
+        .catch(error => {
+            console.error('Fetch error:', error);
+            responseSpan.innerText = error.message;
+            spinner.style.display = "none";
+        });
     } catch( e ) {
+        console.error(e);
         responseSpan.innerText = e.message;
         spinner.style.display = "none";
     }
