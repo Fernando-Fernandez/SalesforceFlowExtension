@@ -1,12 +1,89 @@
-const KEY = 'hashedKey';
-const DEFAULT_PROMPT = `Your purpose is to help everyone quickly understand \
-what this Salesforce flow does and how.\
-Let us think step-by-step and briefly summarize the flow in the format: \
-purpose of the flow, the main objects queried/inserted/updated, \
-dependencies (labels, hard-coded ids, values, emails, names, etc) from outside the flow, \
-the main conditions it evaluates, and any potential or evident issues.\
-\\nFLOW: \\n`;
-const ELEMENT_TYPE_START = 'start';
+// Configuration Constants
+const CONFIG = {
+    // Storage and caching
+    STORAGE_KEY: 'hashedKey',
+    CACHE_DURATION: 300000, // 5 minutes in milliseconds
+    
+    // GPT API Configuration
+    GPT_PARAMS: {
+        temperature: 0.3,
+        top_p: 0.2,
+        max_tokens: 2000,
+        gpt5_max_tokens: 5000,
+        frequency_penalty: 0,
+        presence_penalty: 0,
+        default_model: 'gpt-5-nano'
+    },
+    
+    // Data size limits for model selection
+    DATA_LIMITS: {
+        model_upgrade_threshold: 16200,    // chars - upgrade from gpt-5-nano to gpt-4o
+        truncation_threshold: 130872,      // chars - hard limit for any model
+        cache_key_substring_length: 20     // chars - for cache key generation
+    },
+    
+    // API endpoints
+    ENDPOINTS: {
+        gpt5: "https://api.openai.com/v1/responses",
+        standard: "https://api.openai.com/v1/chat/completions"
+    },
+    
+    // System prompts and messages
+    PROMPTS: {
+        default: `Your purpose is to help everyone quickly understand \\
+what this Salesforce flow does and how.\\
+Let us think step-by-step and briefly summarize the flow in the format: \\
+purpose of the flow, the main objects queried/inserted/updated, \\
+dependencies (labels, hard-coded ids, values, emails, names, etc) from outside the flow, \\
+the main conditions it evaluates, and any potential or evident issues.\\
+\\nFLOW: \\n`,
+        system: 'You are an expert at troubleshooting and explaining Salesforce flows.',
+        no_response: 'No response content received from GPT-5 model',
+        response_truncated: ' (RESPONSE TRUNCATED DUE TO LIMIT)'
+    },
+    
+    // Error messages
+    ERRORS: {
+        no_key: "Please set an OpenAI key to get an AI explanation.",
+        no_data_received: 'No data received from current page.',
+        no_data_to_send: 'No data to send.'
+    },
+    
+    // Flow element types and values
+    FLOW: {
+        element_types: {
+            start: 'start'
+        },
+        parameter_separator: ' / ',
+        parameter_separator_length: 2
+    },
+    
+    // Model configurations
+    MODELS: {
+        supported: ['gpt-4o', 'gpt-4.1', 'gpt-5-nano', 'gpt-5-mini'],
+        gpt5_temperature: 1  // GPT-5 models only support temperature = 1
+    },
+    
+    // Hash function constants
+    HASH: {
+        shift_amount: 5,
+        initial_value: 0
+    },
+    
+    // DOM and formatting
+    UI: {
+        xhr_ready_state: 4,
+        gpt5_response_path: {
+            output_index: 1,
+            content_index: 0
+        },
+        gpt4_response_path: {
+            choice_index: 0
+        }
+    }
+};
+
+// All constants are now centralized in CONFIG object above
 
 chrome.runtime.onMessage.addListener(
     function( request, sender, sendResponse ) {
@@ -95,7 +172,7 @@ function getParameters( action ) {
     let parameters = '';
     let elementType = action.type;
 
-    if( elementType == ELEMENT_TYPE_START ) {
+    if( elementType == CONFIG.FLOW.element_types.start ) {
         let type = action.triggerType + ' ' + action.recordTriggerType;
         parameters += `Type = ${type}`;
         parameters += ` / Object = ${action.object}`;
@@ -236,8 +313,8 @@ function getParameters( action ) {
         parameters += ` / Order = ${action.iterationOrder}`;
     }
 
-    if( parameters.indexOf( ' / ' ) == 0 ) {
-        parameters = parameters.substring( 2 );
+    if( parameters.indexOf( CONFIG.FLOW.parameter_separator ) == 0 ) {
+        parameters = parameters.substring( CONFIG.FLOW.parameter_separator_length );
     }
 
     return parameters;
@@ -261,7 +338,7 @@ function getMDTableRows( actionMap ) {
         let prefix = `|${action.fullDescription}|${elementType}|${ parameters }|`;
 
         // handle elements with multiple rows
-        if( elementType == ELEMENT_TYPE_START ) {
+        if( elementType == CONFIG.FLOW.element_types.start ) {
             stepByStepMDTable += `${prefix}Runs immediately|${ nextElement }|\n`;
             prefix = '||||';
             if( action.scheduledPaths ) {
@@ -350,7 +427,7 @@ function parseFlow( flowDefinition ) {
     }
     firstElement.name = 'Start';
     firstElement.fullDescription = firstElement.name;
-    firstElement.type = ELEMENT_TYPE_START;
+    firstElement.type = CONFIG.FLOW.element_types.start;
     firstElement.branchArray = [];
     firstElement.parameters = getParameters( firstElement );
 
@@ -530,38 +607,68 @@ function parseFlow( flowDefinition ) {
     responseSpan.innerText = '';
 
     const errorSpan = document.getElementById( "error" );
-    let storedKey = localStorage.getItem( KEY );
+    let storedKey = localStorage.getItem( CONFIG.STORAGE_KEY );
     if( ! storedKey ) {
         const spinner = document.getElementById( "spinner" );
         spinner.style.display = "none";
         responseSpan.innerText = '';
-        errorSpan.innerText = "Please set an OpenAI key to get an AI explanation.";
+        errorSpan.innerText = CONFIG.ERRORS.no_key;
         return;
     }
 
-    // since we have OpenAI key, display button to call it
-    let gptInputs = document.getElementById( 'gptInputs' );
-    gptInputs.innerHTML = "";
-    let gptQuestionLabel = document.createElement( 'label' );
-    gptQuestionLabel.innerText = 'Ask your question or leave blank for default prompt:';
-    gptQuestionLabel.setAttribute( 'for', 'gptQuestion' );
-    let gptQuestion = document.createElement( 'input' );
-    gptQuestion.setAttribute( 'id', 'gptQuestion' );
-    let gptButton = document.createElement( 'button' );
-    gptButton.innerHTML = 'Ask GPT';
-    let gptSelection = document.createElement( 'div' );
-    gptSelection.innerHTML += `
-        <input type="radio" id="gpt-4o" name="gpt-version" value="gpt-4o" checked>
-        <label for="gpt-4o">gpt-4o</label>
-        <input type="radio" id="gptVersion" name="gpt-version" value="gpt-3.5-turbo" >
-        <label for="gpt-3.5-turbo">gpt-3.5-turbo</label>`;
+    // since we have OpenAI key, show the dialog container
+    let gptDialogContainer = document.getElementById( 'gptDialogContainer' );
+    gptDialogContainer.style.display = 'block';
+    let gptButton = document.getElementById( 'gptButton' );
+    // Load saved model preference or default to gpt-4o
+    let savedModel = localStorage.getItem('selectedGPTModel') || CONFIG.MODELS.supported[0];
+    
+    let gptSelection = document.getElementById( 'gptModelSelection' );
+    gptSelection.style.display = 'block';
+    
+    // Update radio button selection based on saved model
+    let radioButtons = gptSelection.querySelectorAll('input[name="gpt-version"]');
+    let customInput = document.getElementById('custom-model-name');
+    let customModelInput = gptSelection.querySelector('.custom-model-input');
+    
+    radioButtons.forEach(radio => {
+        if (radio.value === savedModel) {
+            radio.checked = true;
+        } else if (radio.value === 'custom' && savedModel && !CONFIG.MODELS.supported.includes(savedModel)) {
+            radio.checked = true;
+            customModelInput.style.display = 'block';
+            customInput.value = savedModel;
+        }
+    });
+    
+    // Add event listeners to save model preference and handle custom input
+    gptSelection.addEventListener('change', (e) => {
+        if (e.target.name === 'gpt-version') {
+            const customModelInput = gptSelection.querySelector('.custom-model-input');
+            const customModelName = gptSelection.querySelector('#custom-model-name');
+            
+            if (e.target.value === 'custom') {
+                customModelInput.style.display = 'block';
+                customModelName.focus();
+            } else {
+                customModelInput.style.display = 'none';
+                localStorage.setItem('selectedGPTModel', e.target.value);
+            }
+        }
+    });
+    
+    // Handle custom model name input
+    gptSelection.addEventListener('input', (e) => {
+        if (e.target.id === 'custom-model-name') {
+            const customRadios = gptSelection.querySelectorAll('input[value="custom"]');
+            const customRadio = customRadios[0];
+            if (customRadio && customRadio.checked && e.target.value.trim()) {
+                localStorage.setItem('selectedGPTModel', e.target.value.trim());
+            }
+        }
+    });
 
-    let gptDialogContainer = document.createElement( 'div' );
-    gptDialogContainer.appendChild( gptQuestionLabel );
-    gptDialogContainer.appendChild( gptQuestion );
-    gptDialogContainer.appendChild( gptButton );
-    gptDialogContainer.appendChild( gptSelection );
-    gptInputs.appendChild( gptDialogContainer );
+    // Model selection is already in the HTML, no need to append
     
     // make button call GPT 
     gptButton.addEventListener( 'click', () => {
@@ -588,10 +695,17 @@ function parseFlow( flowDefinition ) {
         if( gptQuestion && gptQuestion.value ) {
             prompt = gptQuestion.value + '\\nFLOW: \\n';
         } else {
-            prompt = `This flow: ${explanation.replaceAll( /\n/g, '\\n' )} ` + DEFAULT_PROMPT;
+            prompt = `This flow: ${explanation.replaceAll( /\n/g, '\\n' )} ` + CONFIG.PROMPTS.default;
         }
 
-        let gptModel = document.querySelector( 'input[name="gpt-version"]:checked' ).value;
+        let gptModelSelection = document.querySelector( 'input[name="gpt-version"]:checked' ).value;
+        let gptModel = gptModelSelection;
+        
+        // If custom model is selected, get the actual model name from the input field
+        if (gptModelSelection === 'custom') {
+            const customModelName = document.getElementById('custom-model-name').value.trim();
+            gptModel = customModelName || 'gpt-4o'; // fallback to gpt-4o if empty
+        }
 
         let dataObject = { 
             currentURL: window.location.href, 
@@ -630,11 +744,8 @@ function createTableFromMarkDown( flowName, actionMap, stepByStepMDTable ) {
     }
 
     let flowTableContainer = document.getElementById( 'flowTableContainer');
-    if( flowTableContainer ) {
-        flowTableContainer.remove();
-    }
-    flowTableContainer = document.createElement( "DIV" );
-    flowTableContainer.setAttribute( "id", "flowTableContainer" );
+    flowTableContainer.style.display = 'block';
+    flowTableContainer.innerHTML = '';
 
     let table = '<br /><table id="flowTable"><thead>' + stepByStepMDTable
                 .replaceAll( "|\n|-|-|-|-|-|\n|", "</td></tr></head><tbody><tr><td>" )
@@ -651,10 +762,9 @@ function createTableFromMarkDown( flowName, actionMap, stepByStepMDTable ) {
                     + '</tbody></table><br />';
     flowTableContainer.innerHTML = table;
 
-    // create download MarkDown link
-    let downloadButton = document.createElement( 'button' );
-    downloadButton.innerHTML = 'Download Flow Definition in MarkDown Format';
-    // downloadButton.style = 'background-color: blueviolet!important; color: white!important; ';
+    // use existing download button
+    let downloadButton = document.getElementById( 'downloadButton' );
+    downloadButton.style.display = 'block';
     downloadButton.addEventListener( 'click', () => {
         // create blob with markdown for download
         let markDownDescription = new Blob( [stepByStepMDTable], { type: 'text/markdown' } );
@@ -676,13 +786,10 @@ function createTableFromMarkDown( flowName, actionMap, stepByStepMDTable ) {
         URL.revokeObjectURL( url );
     } );
 
-    // add table to the document
-    let flowDivElement = document.getElementById( 'flow' );
-    flowDivElement.appendChild( downloadButton );
-    flowDivElement.appendChild( flowTableContainer );
+    // table and button are already in the document, no need to append
 }
 
-let index = 0;
+let index = CONFIG.HASH.initial_value;
 let forksArray = [];
 function assignIndexToElements( actionMap, currentElement, parentBranch, conditionLabel ) {
     // assign order number to current element
@@ -740,28 +847,27 @@ function setKey() {
     let enc = new TextEncoder();
     let encrypted = enc.encode( openAIKeyInput.value );
 
-    localStorage.setItem( KEY, JSON.stringify( encrypted ) );
+    localStorage.setItem( CONFIG.STORAGE_KEY, JSON.stringify( encrypted ) );
     errorSpan.innerText = "An AI explanation should appear here the next time you open this page.";
 }
 
 function verySimpleHash( data ) {
-    let hash = 0;
+    let hash = CONFIG.HASH.initial_value;
     for( let i = 0, len = data.length; i < len; i++ ) {
         let chr = data.charCodeAt( i );
-        hash = ( hash << 5 ) - hash + chr;
+        hash = ( hash << CONFIG.HASH.shift_amount ) - hash + chr;
         hash |= 0;
     }
     return hash;
 }
 
-const CACHE_DURATION = 300000; // 5 min
 function sendToGPT( dataObject, openAIKey ) {
     const spinner = document.getElementById( "spinner" );
     const responseSpan = document.getElementById( "response" );
     // const errorSpan = document.getElementById( "error" );
     try {
         if( ! dataObject ) {
-            responseSpan.innerText = 'No data received from current page.';
+            responseSpan.innerText = CONFIG.ERRORS.no_data_received;
             spinner.style.display = "none";
             return;
         }
@@ -769,7 +875,7 @@ function sendToGPT( dataObject, openAIKey ) {
         let { currentURL, resultData, prompt, gptModel } = dataObject;
 
         if( ! resultData ) {
-            responseSpan.innerText = 'No data to send.';
+            responseSpan.innerText = CONFIG.ERRORS.no_data_to_send;
             spinner.style.display = "none";
             return;
         }
@@ -780,20 +886,20 @@ function sendToGPT( dataObject, openAIKey ) {
 
             // if older than cache limit
             let cacheAgeMs = Math.abs( Date.now() - parsedCachedResponse?.cachedDate );
-            if( cacheAgeMs >= CACHE_DURATION ) {
+            if( cacheAgeMs >= CONFIG.CACHE_DURATION ) {
                 sessionStorage.removeItem( aKey );
             }
         } );
 
         // attempt to retrieve previously stored response
-        const cacheKey = verySimpleHash( currentURL + prompt + resultData.substring( 0, 20 ) ); // JSON.stringify( { currentURL, resultData, prompt } );
+        const cacheKey = verySimpleHash( currentURL + prompt + resultData.substring( 0, CONFIG.DATA_LIMITS.cache_key_substring_length ) ); // JSON.stringify( { currentURL, resultData, prompt } );
         const cachedResponse = sessionStorage.getItem( cacheKey );
         if( cachedResponse != null && cachedResponse != undefined ) {
             let parsedCachedResponse = JSON.parse( cachedResponse );
 
             // only use cached response if newer than cache limit
             let cacheAgeMs = Math.abs( Date.now() - parsedCachedResponse?.cachedDate );
-            if( cacheAgeMs < CACHE_DURATION ) {
+            if( cacheAgeMs < CONFIG.CACHE_DURATION ) {
                 // display response 
                 responseSpan.innerText = 'OpenAI (cached response): ' + parsedCachedResponse.parsedResponse;
                 spinner.style.display = "none";
@@ -802,13 +908,13 @@ function sendToGPT( dataObject, openAIKey ) {
         }
 
         // use parameters recommended for Code Comment Generation
-        let temperature = 0.3;  // was 1;
-        let top_p = 0.2; // was 1;
-        let max_tokens = 2000; // was 256 then 900
-        let frequency_penalty = 0;
-        let presence_penalty = 0;
-        let model = ( gptModel ? gptModel : 'gpt-3.5-turbo' );
-        let systemPrompt = 'You are an expert at troubleshooting and explaining Salesforce flows.';
+        let temperature = CONFIG.GPT_PARAMS.temperature;
+        let top_p = CONFIG.GPT_PARAMS.top_p;
+        let max_tokens = CONFIG.GPT_PARAMS.max_tokens;
+        let frequency_penalty = CONFIG.GPT_PARAMS.frequency_penalty;
+        let presence_penalty = CONFIG.GPT_PARAMS.presence_penalty;
+        let model = ( gptModel ? gptModel : CONFIG.GPT_PARAMS.default_model );
+        let systemPrompt = CONFIG.PROMPTS.system;
         // was 'You are a helpful assistant.';
 
         // replace characters that would invalidate the JSON payload‘
@@ -818,65 +924,140 @@ function sendToGPT( dataObject, openAIKey ) {
                                 .replaceAll( '\t', ' ' ).replaceAll( '   ', ' ' );
 
         // check size of data and select a bigger model as needed
-        if( data.length > 16200 ) {
-
-            model = 'gpt-4o'; // 'gpt-3.5-turbo-16k';
-            // truncate data as needed
-            if( data.length > 130872 ) {
-                data = data.substring( 0, 130872 );
+        let originalModel = model;
+        let modelUpgraded = false;
+        
+        if( data.length > CONFIG.DATA_LIMITS.model_upgrade_threshold ) {
+            // Only upgrade to gpt-4o if user selected gpt-5-nano but data is too large
+            if( model === 'gpt-5-nano' ) {
+                model = 'gpt-4o';
+                modelUpgraded = true;
+                console.log(`Data size (${data.length} chars) requires upgrade from ${originalModel} to ${model}`);
+            }
+            
+            // truncate data as needed for any model
+            if( data.length > CONFIG.DATA_LIMITS.truncation_threshold ) {
+                data = data.substring( 0, CONFIG.DATA_LIMITS.truncation_threshold );
+                console.log('Data truncated to fit model context window');
             }
         }
+        
+        // Update status message to show model being used
+        let statusMessage = modelUpgraded ? 
+            `Using ${model} (auto-upgraded from ${originalModel} due to data size)...` :
+            `Using ${model}...`;
+        responseSpan.innerText = statusMessage;
 
-        // build prompt with current page data in a request
-        // let payload = `{ "model":"${model}","messages":[{"role":"system","content":"${systemPrompt}"},{"role":"user","content":"${prompt} ${data}"}],"temperature": ${temperature},"max_tokens":${max_tokens},"top_p":${top_p},"frequency_penalty":${frequency_penalty},"presence_penalty":${presence_penalty} }`;
-        let sysMessage = `{"role":"system","content":[{"type":"text","text":"${systemPrompt}"}]}`;
-        let userMessage = `{"role":"user","content":[{"type":"text","text":"${prompt} ${data}"}]}`;
-        let payload = `{ "model":"${model}","messages":[${sysMessage},${userMessage}],"temperature": ${temperature},"max_tokens":${max_tokens},"top_p":${top_p},"frequency_penalty":${frequency_penalty},"presence_penalty":${presence_penalty} }`;
+        // Determine if model is GPT-5 and adjust parameters accordingly
+        let isGPT5Model = model.toLowerCase().startsWith('gpt-5')
+                    || model.toLowerCase().includes('o4-mini');
+        let tokenLimitParam = isGPT5Model ? 'max_output_tokens' : 'max_tokens';
+        let modelTemperature = isGPT5Model ? CONFIG.MODELS.gpt5_temperature : temperature; // GPT-5 models only support temperature = 1
+        
+        // Build different payload structures for GPT-5 vs other models
+        let payloadParams;
+        let url;
+        
+        if (isGPT5Model) {
+            // GPT-5 uses different endpoint and payload structure
+            url = CONFIG.ENDPOINTS.gpt5;
+            max_tokens = CONFIG.GPT_PARAMS.gpt5_max_tokens;
+            let fullInput = `${systemPrompt}\n\n${prompt} ${data}`;
+            payloadParams = {
+                model: model,
+                input: fullInput,
+                temperature: modelTemperature,
+                [tokenLimitParam]: max_tokens
+            };
+        } else {
+            // Standard chat completions for other models
+            url = CONFIG.ENDPOINTS.standard;
+            let sysMessage = `{"role":"system","content":[{"type":"text","text":"${systemPrompt}"}]}`;
+            let userMessage = `{"role":"user","content":[{"type":"text","text":"${prompt} ${data}"}]}`;
+            payloadParams = {
+                model: model,
+                messages: [JSON.parse(sysMessage), JSON.parse(userMessage)],
+                temperature: modelTemperature,
+                [tokenLimitParam]: max_tokens,
+                top_p: top_p,
+                frequency_penalty: frequency_penalty,
+                presence_penalty: presence_penalty
+            };
+        }
+        
+        let payload = JSON.stringify(payloadParams);
+
+        console.log( payload );
 
         // prepare request
-        let url = "https://api.openai.com/v1/chat/completions";
         let xhr = new XMLHttpRequest();
         xhr.open( "POST", url );
         xhr.setRequestHeader( "Content-Type", "application/json" );
         xhr.setRequestHeader( "Authorization", "Bearer " + openAIKey );
 
         // submit request and receive response
-        responseSpan.innerText = 'Waiting for OpenAI response...';
         xhr.onreadystatechange = function () {
-            if( xhr.readyState === 4 ) {
-                // console.log( xhr.status );
-                // console.log( xhr.responseText );
-                let open_ai_response = xhr.responseText;
-                // console.log( open_ai_response );
+            if( xhr.readyState !== CONFIG.UI.xhr_ready_state ) {
+                return;
+            }
 
-                let parsedResponse = JSON.parse( open_ai_response );
+            let open_ai_response = xhr.responseText;
+            console.log( open_ai_response );
 
-                console.log( parsedResponse.usage );
+            let parsedResponse = JSON.parse( open_ai_response );
 
-                if( parsedResponse.error ) {
-                    parsedResponse = parsedResponse.error.message + ` (${parsedResponse.error.type})`;
+            console.log( parsedResponse );
 
+            if( parsedResponse.error ) {
+                parsedResponse = parsedResponse.error.message + ` (${parsedResponse.error.type})`;
+            } else if (isGPT5Model) {
+                // Check finish reason for GPT-5 with proper guard clauses
+                let responseText = null;
+                
+                // Safely navigate the response structure
+                if (parsedResponse.output && 
+                    Array.isArray(parsedResponse.output) && 
+                    parsedResponse.output[CONFIG.UI.gpt5_response_path.output_index] && 
+                    parsedResponse.output[CONFIG.UI.gpt5_response_path.output_index].content && 
+                    Array.isArray(parsedResponse.output[CONFIG.UI.gpt5_response_path.output_index].content) && 
+                    parsedResponse.output[CONFIG.UI.gpt5_response_path.output_index].content[CONFIG.UI.gpt5_response_path.content_index] && 
+                    parsedResponse.output[CONFIG.UI.gpt5_response_path.output_index].content[CONFIG.UI.gpt5_response_path.content_index].text) {
+                    responseText = parsedResponse.output[CONFIG.UI.gpt5_response_path.output_index].content[CONFIG.UI.gpt5_response_path.content_index].text;
+                }
+                
+                console.log(responseText);
+                
+                if (!responseText) {
+                    responseText = CONFIG.PROMPTS.no_response;
                 } else {
-                    let finishReason = parsedResponse.choices[ 0 ].finish_reason;
-                    parsedResponse = parsedResponse.choices[ 0 ].message.content;
-                    // The token count of prompt + max_tokens will not exceed the model's context length. 
-                    if( finishReason == 'length' ) {
-                        parsedResponse = parsedResponse + ' (RESPONSE TRUNCATED DUE TO LIMIT)';
+                    // Check for truncation only if we have valid response text
+                    if (parsedResponse.status === 'incomplete' && parsedResponse.incomplete_details?.reason === 'max_output_tokens') {
+                        responseText += CONFIG.PROMPTS.response_truncated;
                     }
                 }
-
-                // store response in local cache
-                const cacheKey = JSON.stringify( { currentURL, resultData, prompt } );
-                sessionStorage.setItem( cacheKey, JSON.stringify( { 
-                                                cachedDate: Date.now() 
-                                                , parsedResponse } ) 
-                                        );
-
-                // display response 
-                responseSpan.innerText = parsedResponse;
-                convertResponseFromMarkdown();
-                spinner.style.display = "none";
+                
+                parsedResponse = responseText;
+            } else {
+                // Standard GPT-4 and earlier response structure
+                let finishReason = parsedResponse.choices[ CONFIG.UI.gpt4_response_path.choice_index ].finish_reason;
+                parsedResponse = parsedResponse.choices[ CONFIG.UI.gpt4_response_path.choice_index ].message.content;
+                // The token count of prompt + max_tokens will not exceed the model's context length. 
+                if( finishReason == 'length' ) {
+                    parsedResponse = parsedResponse + CONFIG.PROMPTS.response_truncated;
+                }
             }
+
+            // store response in local cache
+            const cacheKey = JSON.stringify( { currentURL, resultData, prompt } );
+            sessionStorage.setItem( cacheKey, JSON.stringify( { 
+                                            cachedDate: Date.now() 
+                                            , parsedResponse } ) 
+                                    );
+
+            // display response 
+            responseSpan.innerText = parsedResponse;
+            convertResponseFromMarkdown();
+            spinner.style.display = "none";
         };
 
         xhr.send( payload );

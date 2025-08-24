@@ -1,7 +1,7 @@
 {
     "manifest_version": 3
     , "name": "Salesforce Flow Extension"
-    , "version": "1.1.6"
+    , "version": "1.1.7"
     , "description": "Shows tooltips on flow elements and exposes flow information with GPT queries"
     , "icons": {
       "16": "images/icon-16.png",

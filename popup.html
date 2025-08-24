@@ -6,29 +6,69 @@
 </head>
 <body>
     <div id="main">
-        <div id="defaultExplainer">
+        <div id="leftPanel">
+            <div id="defaultExplainer">
+            </div>
+            
+            <div id="flowExplainer" >
+                <div id="gptInputs" >
+                    <div id="gptDialogContainer" style="display: none;">
+                        <label for="gptQuestion">Ask your question or leave blank for default prompt:</label>
+                        <input id="gptQuestion" type="text" />
+                        <button id="gptButton">Ask GPT</button>
+                    </div>
+                </div>
+                <span id="error" style="font-weight: bold; color: red;" ></span>
+                <br />
+                <div id="spinner" class="lds-dual-ring">&#x263C;</div>
+                <span id="response" > </span>
+            </div>
         </div>
 
-        <div id="gpt" >
-            <label for="openAIKey" >OpenAI Key</label>
-            <input id="openAIKey" type="password" name="openAIKey" />
-            &nbsp;&nbsp;
-            <button id="setKey" >Set OpenAI key</button>
-        </div>
-
-        <div id="flowExplainer" >
-            <div id="gptInputs" ></div>
-            <span id="error" style="font-weight: bold; color: red;" ></span>
-            <br />
-            <div id="spinner" class="lds-dual-ring">&#x263C;</div>
-            <span id="response" > </span>
+        <div id="rightPanel">
+            <div id="gpt" >
+                <label for="openAIKey" >OpenAI Key</label>
+                <input id="openAIKey" type="password" name="openAIKey" />
+                &nbsp;&nbsp;
+                <button id="setKey" >Set OpenAI key</button>
+                
+                <div id="gptModelSelection" class="model-selection" style="display: none;">
+                    <div class="model-selection-inline">
+                        <span class="model-selection-label">AI Model:</span>
+                        <div class="model-options-inline">
+                            <label class="model-option-compact">
+                                <input type="radio" name="gpt-version" value="gpt-4o" checked>
+                                <span class="model-name-compact">GPT-4o</span>
+                            </label>
+                            <label class="model-option-compact">
+                                <input type="radio" name="gpt-version" value="gpt-4.1">
+                                <span class="model-name-compact">GPT-4.1</span>
+                            </label>
+                            <label class="model-option-compact">
+                                <input type="radio" name="gpt-version" value="gpt-5-nano">
+                                <span class="model-name-compact">GPT-5 Nano</span>
+                            </label>
+                            <label class="model-option-compact">
+                                <input type="radio" name="gpt-version" value="gpt-5-mini">
+                                <span class="model-name-compact">GPT-5 Mini</span>
+                            </label>
+                            <label class="model-option-compact">
+                                <input type="radio" name="gpt-version" value="custom">
+                                <span class="model-name-compact">Custom</span>
+                            </label>
+                        </div>
+                    </div>
+                    <div class="custom-model-input" style="display: none;">
+                        <input type="text" id="custom-model-name" placeholder="e.g., gpt-4-turbo, gpt-5-mini" />
+                    </div>
+                </div>
+            </div>
         </div>
     </div>
     <div id="flow" >
+        <button id="downloadButton" style="display: none;">Download Flow Definition in MarkDown Format</button>
+        <div id="flowTableContainer" style="display: none;"></div>
     </div>
-    <script src="./scripts/popup.js" />
-    <script>
-        load();
-    </script>
+    <script src="./scripts/popup.js"></script>
 </body>
 </html>

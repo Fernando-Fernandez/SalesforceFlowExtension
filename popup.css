@@ -80,3 +80,101 @@ H4 {
 .smallText {
     font-size: x-small;
 }
+
+/* Model Selection Styles */
+.model-selection {
+    margin: 5px 0 5px 0;
+    border: 1px solid #e0e0e0;
+    border-radius: 8px;
+    padding: 2px;
+    background-color: #f9f9f9;
+}
+
+/* Inline layout for label and radio buttons */
+.model-selection-inline {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.model-selection-label {
+    font-weight: bold;
+    color: #333;
+    font-size: 14px;
+    white-space: nowrap;
+}
+
+.model-options-inline {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.model-option-compact {
+    display: flex;
+    align-items: center;
+    padding: 6px 10px;
+    border: 1px solid #ddd;
+    border-radius: 6px;
+    background-color: white;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    white-space: nowrap;
+}
+
+.model-option-compact:hover {
+    background-color: #f0f8ff;
+    border-color: #4a90e2;
+}
+
+.model-option-compact input[type="radio"] {
+    margin: 0 6px 0 0;
+    cursor: pointer;
+}
+
+.model-name-compact {
+    font-weight: bold;
+    color: #333;
+    font-size: 13px;
+    cursor: pointer;
+}
+
+.model-option-compact input[type="radio"]:checked + .model-name-compact {
+    color: #4a90e2;
+}
+
+.model-option-compact:has(input[type="radio"]:checked) {
+    background-color: #e3f2fd;
+    border-color: #4a90e2;
+}
+
+/* Custom Model Input Styles */
+.custom-model-input {
+    margin-top: 4px;
+    padding: 4px;
+    background-color: #f8f9fa;
+    border: 1px solid #e0e0e0;
+    border-radius: 6px;
+}
+
+.custom-model-input input[type="text"] {
+    width: 100%;
+    padding: 6px 8px;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    font-size: 12px;
+    font-family: monospace;
+    background-color: white;
+    box-sizing: border-box;
+}
+
+.custom-model-input input[type="text"]:focus {
+    outline: none;
+    border-color: #4a90e2;
+    box-shadow: 0 0 0 2px rgba(74, 144, 226, 0.2);
+}
+
+.custom-model-input input[type="text"]::placeholder {
+    color: #999;
+    font-style: italic;
+}

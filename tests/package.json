@@ -1,0 +1,26 @@
+{
+  "name": "salesforce-flow-extension-tests",
+  "version": "1.0.0",
+  "description": "Jest tests for Salesforce Flow Extension",
+  "scripts": {
+    "test": "jest",
+    "test:watch": "jest --watch",
+    "test:coverage": "jest --coverage"
+  },
+  "devDependencies": {
+    "jest": "^29.7.0",
+    "jest-environment-jsdom": "^29.7.0"
+  },
+  "jest": {
+    "testEnvironment": "jsdom",
+    "setupFilesAfterEnv": ["<rootDir>/setup.js"],
+    "testMatch": [
+      "**/__tests__/**/*.js",
+      "**/?(*.)+(spec|test).js"
+    ],
+    "collectCoverageFrom": [
+      "../scripts/**/*.js",
+      "!../scripts/background.js"
+    ]
+  }
+}

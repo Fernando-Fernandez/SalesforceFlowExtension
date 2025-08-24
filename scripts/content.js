@@ -455,10 +455,10 @@ function displayTooltip( event, displayFlag ) {
     ] );
 
     // tooltip on the start flow element
+    const containsStart = event.currentTarget.children?.[0]?.children?.[1]?.children?.[1]?.innerText == 'Start'
+                    || event.currentTarget.children?.[1]?.children?.[1]?.children?.[1]?.innerText == 'Start'
     const isStartElement = event.currentTarget.className === 'start-node-box'
-            || ( autoLayout 
-                && event.currentTarget.children[ 0 ].children[ 1 ].children[ 1 ]
-                && event.currentTarget.children[ 0 ].children[ 1 ].children[ 1 ].innerText == 'Start' );
+                    || ( autoLayout && containsStart );
 
     if( isStartElement ) {
         let descriptionArray = indexElementsAndReturnDescription( definitionMap );
