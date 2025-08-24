@@ -78,6 +78,23 @@ const CONFIG = {
 
 // All constants are now centralized in CONFIG object above
 
+const dom = {
+    setKeyButton: document.getElementById('setKey'),
+    defaultExplainer: document.getElementById('defaultExplainer'),
+    response: document.getElementById('response'),
+    error: document.getElementById('error'),
+    spinner: document.getElementById('spinner'),
+    gptDialogContainer: document.getElementById('gptDialogContainer'),
+    gptButton: document.getElementById('gptButton'),
+    gptModelSelection: document.getElementById('gptModelSelection'),
+    customModelName: document.getElementById('custom-model-name'),
+    customModelInput: document.querySelector('.custom-model-input'),
+    gptQuestion: document.getElementById('gptQuestion'),
+    flowTableContainer: document.getElementById('flowTableContainer'),
+    downloadButton: document.getElementById('downloadButton'),
+    openAIKeyInput: document.querySelector('input#openAIKey')
+};
+
 chrome.runtime.onMessage.addListener(
     function( request, sender, sendResponse ) {
         if( request.flowDefinition ) {
@@ -86,7 +103,7 @@ chrome.runtime.onMessage.addListener(
     }
 );
 
-document.getElementById( "setKey" ).addEventListener( 'click', function() { setKey(); } );
+dom.setKeyButton.addEventListener( 'click', function() { setKey(); } );
 
 function parseValue( rightValue ) {
     let theValue = rightValue?.apexValue ??
@@ -578,11 +595,10 @@ function parseFlow( flowDefinition ) {
     // console.log( explanation );
 
     // display default explanation
-    let explainerDivElement = document.getElementById( 'defaultExplainer' );
-    explainerDivElement.innerHTML = "";
+    dom.defaultExplainer.innerHTML = "";
     let explanationHTML = document.createElement( 'span' );
     explanationHTML.innerHTML = '<b>This flow:  </b>' + explanation.replaceAll( /\n/g, '<br />' );
-    explainerDivElement.appendChild( explanationHTML );
+    dom.defaultExplainer.appendChild( explanationHTML );
 
     // generate itemized description of the flow
     let stepByStepMDTable = `${flowName}\nDescription: ${flowDescription}\nType: ${flowDefinition.processType}\n\n`
@@ -596,64 +612,55 @@ function parseFlow( flowDefinition ) {
     // console.log( csvFlow );
 
     // prepare to call OpenAI
-    let responseSpan = document.getElementById( "response" );
-    responseSpan.innerText = '';
+    dom.response.innerText = '';
 
-    const errorSpan = document.getElementById( "error" );
     let storedKey = localStorage.getItem( CONFIG.STORAGE_KEY );
     if( ! storedKey ) {
-        const spinner = document.getElementById( "spinner" );
-        spinner.style.display = "none";
-        responseSpan.innerText = '';
-        errorSpan.innerText = CONFIG.ERRORS.no_key;
+        dom.spinner.style.display = "none";
+        dom.response.innerText = '';
+        dom.error.innerText = CONFIG.ERRORS.no_key;
         return;
     }
 
     // since we have OpenAI key, show the dialog container
-    let gptDialogContainer = document.getElementById( 'gptDialogContainer' );
-    gptDialogContainer.style.display = 'block';
-    let gptButton = document.getElementById( 'gptButton' );
+    dom.gptDialogContainer.style.display = 'block';
     // Load saved model preference or default to gpt-4o
     let savedModel = localStorage.getItem('selectedGPTModel') || CONFIG.MODELS.supported[0];
     
-    let gptSelection = document.getElementById( 'gptModelSelection' );
-    gptSelection.style.display = 'block';
+    dom.gptModelSelection.style.display = 'block';
     
     // Update radio button selection based on saved model
-    let radioButtons = gptSelection.querySelectorAll('input[name="gpt-version"]');
-    let customInput = document.getElementById('custom-model-name');
-    let customModelInput = gptSelection.querySelector('.custom-model-input');
+    let radioButtons = dom.gptModelSelection.querySelectorAll('input[name="gpt-version"]');
     
     radioButtons.forEach(radio => {
         if (radio.value === savedModel) {
             radio.checked = true;
         } else if (radio.value === 'custom' && savedModel && !CONFIG.MODELS.supported.includes(savedModel)) {
             radio.checked = true;
-            customModelInput.style.display = 'block';
-            customInput.value = savedModel;
+            dom.customModelInput.style.display = 'block';
+            dom.customModelName.value = savedModel;
         }
     });
     
     // Add event listeners to save model preference and handle custom input
-    gptSelection.addEventListener('change', (e) => {
+    dom.gptModelSelection.addEventListener('change', (e) => {
         if (e.target.name === 'gpt-version') {
-            const customModelInput = gptSelection.querySelector('.custom-model-input');
-            const customModelName = gptSelection.querySelector('#custom-model-name');
+            const customModelName = dom.gptModelSelection.querySelector('#custom-model-name');
             
             if (e.target.value === 'custom') {
-                customModelInput.style.display = 'block';
+                dom.customModelInput.style.display = 'block';
                 customModelName.focus();
             } else {
-                customModelInput.style.display = 'none';
+                dom.customModelInput.style.display = 'none';
                 localStorage.setItem('selectedGPTModel', e.target.value);
             }
         }
     });
     
     // Handle custom model name input
-    gptSelection.addEventListener('input', (e) => {
+    dom.gptModelSelection.addEventListener('input', (e) => {
         if (e.target.id === 'custom-model-name') {
-            const customRadios = gptSelection.querySelectorAll('input[value="custom"]');
+            const customRadios = dom.gptModelSelection.querySelectorAll('input[value="custom"]');
             const customRadio = customRadios[0];
             if (customRadio && customRadio.checked && e.target.value.trim()) {
                 localStorage.setItem('selectedGPTModel', e.target.value.trim());
@@ -664,10 +671,9 @@ function parseFlow( flowDefinition ) {
     // Model selection is already in the HTML, no need to append
     
     // make button call GPT 
-    gptButton.addEventListener( 'click', () => {
+    dom.gptButton.addEventListener( 'click', () => {
 debugger;
-        const spinner = document.getElementById( "spinner" );
-        spinner.style.display = "inline-block";
+        dom.spinner.style.display = "inline-block";
 
         // extract OpenAI key
         let encodedKey = JSON.parse( storedKey );
@@ -681,13 +687,12 @@ debugger;
             return;
         }
 
-        responseSpan.innerText = 'Asking GPT to explain current flow...';
+        dom.response.innerText = 'Asking GPT to explain current flow...';
 
         // accept user question, otherwise use default prompt
         let prompt;
-        let gptQuestion = document.getElementById( 'gptQuestion' );
-        if( gptQuestion && gptQuestion.value ) {
-            prompt = gptQuestion.value + '\\nFLOW: \\n';
+        if( dom.gptQuestion && dom.gptQuestion.value ) {
+            prompt = dom.gptQuestion.value + '\\nFLOW: \\n';
         } else {
             prompt = `This flow: ${explanation.replaceAll( /\n/g, '\\n' )} ` + CONFIG.PROMPTS.default;
         }
@@ -697,7 +702,7 @@ debugger;
         
         // If custom model is selected, get the actual model name from the input field
         if (gptModelSelection === 'custom') {
-            const customModelName = document.getElementById('custom-model-name').value.trim();
+            const customModelName = dom.customModelName.value.trim();
             gptModel = customModelName || 'gpt-4o'; // fallback to gpt-4o if empty
         }
 
@@ -737,9 +742,8 @@ function createTableFromMarkDown( flowName, actionMap, stepByStepMDTable ) {
         return `|<a href="#${capturedStr}" >${capturedStr}</a>|\n`;
     }
 
-    let flowTableContainer = document.getElementById( 'flowTableContainer');
-    flowTableContainer.style.display = 'block';
-    flowTableContainer.innerHTML = '';
+    dom.flowTableContainer.style.display = 'block';
+    dom.flowTableContainer.innerHTML = '';
 
     let table = '<br /><table id="flowTable"><thead>' + stepByStepMDTable
                 .replaceAll( "|\n|-|-|-|-|-|\n|", "</td></tr></head><tbody><tr><td>" )
@@ -754,12 +758,11 @@ function createTableFromMarkDown( flowName, actionMap, stepByStepMDTable ) {
                 .replaceAll( 'Flow:', '<span style="font-weight: bold;">Flow:</span>' )
                 .replaceAll( '\nDescription:', '\n<br /><span style="font-weight: bold;">Description:</span>' )
                     + '</tbody></table><br />';
-    flowTableContainer.innerHTML = table;
+    dom.flowTableContainer.innerHTML = table;
 
     // use existing download button
-    let downloadButton = document.getElementById( 'downloadButton' );
-    downloadButton.style.display = 'block';
-    downloadButton.addEventListener( 'click', () => {
+    dom.downloadButton.style.display = 'block';
+    dom.downloadButton.addEventListener( 'click', () => {
         // create blob with markdown for download
         let markDownDescription = new Blob( [stepByStepMDTable], { type: 'text/markdown' } );
         const url = URL.createObjectURL( markDownDescription );
@@ -833,16 +836,13 @@ function assignIndexToElements( actionMap, currentElement, parentBranch, conditi
 }
 
 function setKey() {
-    const errorSpan = document.querySelector( "#error" );
-    errorSpan.innerText = "";
-
-    const openAIKeyInput = document.querySelector( "input#openAIKey" );
+    dom.error.innerText = "";
 
     let enc = new TextEncoder();
-    let encrypted = enc.encode( openAIKeyInput.value );
+    let encrypted = enc.encode( dom.openAIKeyInput.value );
 
     localStorage.setItem( CONFIG.STORAGE_KEY, JSON.stringify( encrypted ) );
-    errorSpan.innerText = "An AI explanation should appear here the next time you open this page.";
+    dom.error.innerText = "An AI explanation should appear here the next time you open this page.";
 }
 
 function verySimpleHash( data ) {
@@ -856,21 +856,19 @@ function verySimpleHash( data ) {
 }
 
 function sendToGPT( dataObject, openAIKey ) {
-    const spinner = document.getElementById( "spinner" );
-    const responseSpan = document.getElementById( "response" );
     // const errorSpan = document.getElementById( "error" );
     try {
         if( ! dataObject ) {
-            responseSpan.innerText = CONFIG.ERRORS.no_data_received;
-            spinner.style.display = "none";
+            dom.response.innerText = CONFIG.ERRORS.no_data_received;
+            dom.spinner.style.display = "none";
             return;
         }
 
         let { currentURL, resultData, prompt, gptModel } = dataObject;
 
         if( ! resultData ) {
-            responseSpan.innerText = CONFIG.ERRORS.no_data_to_send;
-            spinner.style.display = "none";
+            dom.response.innerText = CONFIG.ERRORS.no_data_to_send;
+            dom.spinner.style.display = "none";
             return;
         }
 
@@ -895,8 +893,8 @@ function sendToGPT( dataObject, openAIKey ) {
             let cacheAgeMs = Math.abs( Date.now() - parsedCachedResponse?.cachedDate );
             if( cacheAgeMs < CONFIG.CACHE_DURATION ) {
                 // display response 
-                responseSpan.innerText = 'OpenAI (cached response): ' + parsedCachedResponse.parsedResponse;
-                spinner.style.display = "none";
+                dom.response.innerText = 'OpenAI (cached response): ' + parsedCachedResponse.parsedResponse;
+                dom.spinner.style.display = "none";
                 return;
             }
         }
@@ -938,7 +936,7 @@ function sendToGPT( dataObject, openAIKey ) {
         let statusMessage = modelUpgraded ? 
             `Using ${model} (auto-upgraded from ${originalModel} due to data size)...` :
             `Using ${model}...`;
-        responseSpan.innerText = statusMessage;
+        dom.response.innerText = statusMessage;
 
         // Determine if model is GPT-5 and adjust parameters accordingly
         let isMoreRecentModel = model.toLowerCase().startsWith('gpt-5')
@@ -1046,30 +1044,29 @@ function sendToGPT( dataObject, openAIKey ) {
                                     );
 
             // display response 
-            responseSpan.innerText = parsedResponse;
+            dom.response.innerText = parsedResponse;
             convertResponseFromMarkdown();
-            spinner.style.display = "none";
+            dom.spinner.style.display = "none";
         })
         .catch(error => {
             console.error('Fetch error:', error);
-            responseSpan.innerText = error.message;
-            spinner.style.display = "none";
+            dom.response.innerText = error.message;
+            dom.spinner.style.display = "none";
         });
     } catch( e ) {
         console.error(e);
-        responseSpan.innerText = e.message;
-        spinner.style.display = "none";
+        dom.response.innerText = e.message;
+        dom.spinner.style.display = "none";
     }
 }
 
 function convertResponseFromMarkdown() {
-    const span = document.getElementById( "response" );
-    let response = span.innerHTML;
+    let response = dom.response.innerHTML;
 
     // Replace **text** with <b>text</b>
     response = response.replace(/\*\*(.*?)\*\*/g, "<b>$1</b>");
     // Replace ### Heading with <h4>Heading</h4>
     response = response.replace(/### (.*?)(<br>|$)/gm, "<h4>$1</h4>$2");
 
-    span.innerHTML = response;
+    dom.response.innerHTML = response;
 }
