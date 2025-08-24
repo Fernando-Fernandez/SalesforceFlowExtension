@@ -665,7 +665,7 @@ function parseFlow( flowDefinition ) {
     
     // make button call GPT 
     gptButton.addEventListener( 'click', () => {
-debugger;
+
         const spinner = document.getElementById( "spinner" );
         spinner.style.display = "inline-block";
 
