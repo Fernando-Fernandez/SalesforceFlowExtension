@@ -32,7 +32,7 @@ const CONFIG = {
     PROMPTS: {
         default: `Your purpose is to help everyone quickly understand what this Salesforce flow does and how. Let us think step-by-step and briefly summarize the flow in the format: \\npurpose of the flow, the main objects queried/inserted/updated, dependencies (labels, hard-coded ids, values, emails, names, etc) from outside the flow, the main conditions it evaluates, and any potential or evident issues.\\nFLOW: \\n`,
         system: 'You are an expert at troubleshooting and explaining Salesforce flows.',
-        no_response: 'No response content received from GPT-5 model',
+        no_response: 'No response content received from GPT model',
         response_truncated: ' (RESPONSE TRUNCATED DUE TO LIMIT)'
     },
     

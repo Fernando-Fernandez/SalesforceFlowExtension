@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Isometric Flow Renderer Demo</title>
+    <link rel="stylesheet" href="./popup.css">
+    <style>
+        body {
+            font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+            margin: 24px;
+            background-color: #f5f5f7;
+            color: #222;
+        }
+        main {
+            max-width: 1100px;
+            margin: 0 auto;
+        }
+        .demo-card {
+            background: #fff;
+            border-radius: 16px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.08);
+            padding: 20px 28px 32px;
+            border: 1px solid #f1f1f4;
+        }
+        h1 {
+            margin-top: 0;
+        }
+        .demo-controls {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 16px;
+            margin-bottom: 16px;
+        }
+        .demo-controls button,
+        .demo-controls label {
+            font-size: 14px;
+        }
+        .demo-controls button {
+            padding: 10px 14px;
+            border-radius: 8px;
+            border: none;
+            background-color: #4a90e2;
+            color: white;
+            cursor: pointer;
+        }
+        .demo-controls button:hover {
+            background-color: #3d7ac0;
+        }
+        .demo-controls input[type="file"] {
+            border: 1px dashed #cbd5e1;
+            padding: 8px;
+            border-radius: 8px;
+            background: #fafafa;
+        }
+        #demoStatus {
+            font-size: 13px;
+            color: #0c4a6e;
+            margin-bottom: 12px;
+        }
+        #demoStatus.error {
+            color: #b91c1c;
+        }
+    </style>
+</head>
+<body>
+    <main>
+        <div class="demo-card">
+            <h1>Isometric Flow Renderer Demo</h1>
+            <p>Use this page to test the renderer without loading the browser extension. Load the bundled <code>sampleFlow.json</code> or pick any flow definition exported from Salesforce.</p>
+            <div class="demo-controls">
+                <button id="loadSampleFlow" type="button">Load sampleFlow.json</button>
+                <label>
+                    <strong>Or select a flow JSON file:</strong><br>
+                    <input id="flowFileInput" type="file" accept=".json,application/json">
+                </label>
+            </div>
+            <div id="demoStatus"></div>
+            <div id="isometricFlow"></div>
+        </div>
+    </main>
+    <script src="./scripts/isometricFlowRenderer.js"></script>
+    <script src="./scripts/isometricDemo.js"></script>
+</body>
+</html>
