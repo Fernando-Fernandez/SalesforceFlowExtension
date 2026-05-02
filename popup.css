@@ -28,37 +28,110 @@ H4 {
 }
 
 #flowTableContainer {
-    font-size: medium !important;
+    font-size: 13px;
+    line-height: 1.5;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
 }
 
 #flowTable {
-    border: solid 1px gray;
-    border-collapse: collapse!important;
-    width: 95%;
+    border-collapse: collapse;
+    width: 100%;
+    border: 1px solid #cbd5e1;
 }
 
 #flowTable THEAD {
-    background-color: darkslategray;
-    color: white;
-    font-weight: bold;
-    text-align: center;
-    vertical-align: middle;
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    background-color: #1e293b;
+    color: #f1f5f9;
+    font-weight: 600;
+    font-size: 11px;
+    letter-spacing: 0.06em;
     text-transform: uppercase;
+    text-align: left;
+    vertical-align: middle;
+}
+
+#flowTable THEAD TD {
+    padding: 10px 14px;
+    border-bottom: 2px solid #334155;
+}
+
+#flowTable TBODY TR {
+    border-bottom: 1px solid #e2e8f0;
+    transition: background-color 0.12s;
+}
+
+#flowTable TBODY TR:nth-child(even) {
+    background-color: #f8fafc;
+}
+
+#flowTable TBODY TR:hover {
+    background-color: #dbeafe;
 }
 
 #flowTable TD {
-    border: solid 1px lightgray;
-    padding: 8px;
+    padding: 9px 12px;
+    vertical-align: top;
+    border: none;
+    border-right: 1px solid #e2e8f0;
+}
+
+#flowTable TD:last-child {
+    border-right: none;
 }
 
 #flowTable TBODY TD:first-child {
-    background-color: lightgray;
-    font-weight: bold;
+    font-weight: 600;
+    color: #1e293b;
+    text-align: left;
+    white-space: nowrap;
+}
+
+/* Type column — colored per element kind */
+#flowTable TD[data-type] {
+    font-size: 11px;
+    font-weight: 600;
+    text-align: center;
+    white-space: nowrap;
+    letter-spacing: 0.02em;
+}
+
+#flowTable TD[data-type="start"]               { background: #dcfce7; color: #15803d; }
+#flowTable TD[data-type="decision"]            { background: #fef9c3; color: #a16207; }
+#flowTable TD[data-type="recordLookup"]        { background: #f3e8ff; color: #7e22ce; }
+#flowTable TD[data-type="recordCreate"]        { background: #d1fae5; color: #065f46; }
+#flowTable TD[data-type="recordUpdate"]        { background: #ffedd5; color: #c2410c; }
+#flowTable TD[data-type="recordDelete"]        { background: #fee2e2; color: #b91c1c; }
+#flowTable TD[data-type="screen"]              { background: #cffafe; color: #0e7490; }
+#flowTable TD[data-type="loop"]                { background: #e0e7ff; color: #3730a3; }
+#flowTable TD[data-type="actionCall"]          { background: #dbeafe; color: #1d4ed8; }
+#flowTable TD[data-type="assignment"]          { background: #f1f5f9; color: #475569; }
+#flowTable TD[data-type="subflow"]             { background: #fae8ff; color: #86198f; }
+#flowTable TD[data-type="wait"]                { background: #fff7ed; color: #c2410c; }
+#flowTable TD[data-type="transform"]           { background: #fdf2f8; color: #be185d; }
+#flowTable TD[data-type="collectionProcessor"] { background: #ccfbf1; color: #0f766e; }
+#flowTable TD[data-type="apexPluginCall"]      { background: #fef3c7; color: #92400e; }
+
+/* Condition column */
+#flowTable TBODY TD:nth-child(4) {
+    font-size: 12px;
+    color: #64748b;
+}
+
+/* Next-element column */
+#flowTable TBODY TD:nth-child(5) {
     text-align: center;
 }
 
-#flowTable TBODY TD:nth-child(4), #flowTable TBODY TD:nth-child(6) {
-    text-align: center;
+#flowTable a {
+    text-decoration: none;
+    font-weight: 500;
+}
+
+#flowTable a:hover {
+    text-decoration: underline;
 }
 
 .lds-dual-ring {
