@@ -1,32 +1,317 @@
-@media print {
-    @page {size: landscape}
-    button {
-      display: none;
-    }
-    #flow {
-        border: none!important;
-    }
-}
-#flow {
-    width: 100%; 
-    height: 90vh; 
-    overflow: auto; 
-    border: 1px solid lightgray;
-}
-BODY {
-    background-color: white;
+/* ── Reset ──────────────────────────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; }
+
+/* ── Base ───────────────────────────────────────────────────────── */
+body {
+    margin: 0;
+    padding: 0;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    font-size: 13px;
+    color: #1e293b;
+    background: #f1f5f9;
+    min-width: 700px;
 }
 
-H4 {
-    margin-block-start: 0;
-    margin-block-end: 0;
-}
+h4 { margin-block-start: 0; margin-block-end: 0; }
 
+/* ── Top panel layout ───────────────────────────────────────────── */
 #main {
     display: grid;
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: 4fr 1fr;
+    background: white;
+    border-bottom: 1px solid #e2e8f0;
 }
 
+#leftPanel {
+    padding: 12px 16px;
+    border-right: 1px solid #e2e8f0;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+#rightPanel {
+    padding: 12px 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+/* ── Flow area ──────────────────────────────────────────────────── */
+#flow {
+    width: 100%;
+    height: 90vh;
+    overflow: auto;
+    background: white;
+}
+
+#downloadButton {
+    margin: 10px 14px 0;
+    background: white;
+    color: #1e293b;
+    border: 1px solid #cbd5e1;
+}
+
+#downloadButton:hover {
+    background: #f8fafc;
+    border-color: #94a3b8;
+}
+
+/* ── Flow summary (auto-generated) ─────────────────────────────── */
+#defaultExplainer {
+    font-size: 12px;
+    color: #334155;
+    line-height: 1.65;
+    padding: 8px 12px;
+    background: #f8fafc;
+    border-left: 3px solid #2563eb;
+    border-radius: 0 4px 4px 0;
+}
+
+#defaultExplainer:empty { display: none; }
+
+/* ── GPT interaction ────────────────────────────────────────────── */
+#flowExplainer {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+/* flex-direction/gap apply once JS sets display:flex on this element */
+#gptDialogContainer {
+    flex-direction: column;
+    gap: 6px;
+}
+
+#gptDialogContainer label {
+    font-size: 11px;
+    font-weight: 600;
+    color: #64748b;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+#gptQuestion { width: 100%; }
+
+#gptButton { align-self: flex-start; }
+
+#error {
+    font-size: 12px;
+    font-weight: 600;
+    color: #dc2626;
+}
+
+#error:empty { display: none; }
+
+#response {
+    font-size: 12px;
+    line-height: 1.7;
+    color: #334155;
+    white-space: pre-wrap;
+}
+
+/* ── Copy button ────────────────────────────────────────────────── */
+#copyButton {
+    align-self: flex-end;
+    padding: 3px 10px;
+    font-size: 11px;
+    background: white;
+    color: #475569;
+    border: 1px solid #cbd5e1;
+    border-radius: 5px;
+    transition: background-color 0.15s, border-color 0.15s, color 0.15s;
+}
+
+#copyButton:hover {
+    background: #f8fafc;
+    border-color: #94a3b8;
+    color: #1e293b;
+}
+
+/* ── Settings panel ─────────────────────────────────────────────── */
+#gpt {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.key-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.key-row label {
+    font-size: 11px;
+    font-weight: 600;
+    color: #475569;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    white-space: nowrap;
+}
+
+#rightPanel .key-row {
+    flex-direction: column;
+    align-items: stretch;
+}
+
+/* ── Form elements ──────────────────────────────────────────────── */
+input[type="text"],
+input[type="password"] {
+    padding: 6px 10px;
+    border: 1px solid #cbd5e1;
+    border-radius: 6px;
+    font-family: inherit;
+    font-size: 13px;
+    color: #1e293b;
+    background: white;
+    outline: none;
+    transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+input[type="text"]:focus,
+input[type="password"]:focus {
+    border-color: #2563eb;
+    box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
+}
+
+#openAIKey {
+    flex: 1;
+    min-width: 120px;
+}
+
+button {
+    padding: 6px 14px;
+    border: none;
+    border-radius: 6px;
+    font-family: inherit;
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: background-color 0.15s, box-shadow 0.15s;
+    white-space: nowrap;
+}
+
+#setKey,
+#gptButton {
+    background: #2563eb;
+    color: white;
+}
+
+#setKey:hover,
+#gptButton:hover {
+    background: #1d4ed8;
+    box-shadow: 0 1px 4px rgba(37, 99, 235, 0.3);
+}
+
+/* ── Spinner ────────────────────────────────────────────────────── */
+.lds-dual-ring {
+    animation: rotation 1s infinite linear;
+    font-size: 2rem;
+    display: none;
+}
+
+@keyframes rotation {
+    from { transform-origin: 20px 20px; transform: rotate(0deg); }
+    to   { transform-origin: 20px 20px; transform: rotate(359deg); }
+}
+
+/* ── Model selection ────────────────────────────────────────────── */
+.model-selection {
+    margin: 0;
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+    padding: 2px;
+    background: #f8fafc;
+}
+
+.model-selection-inline {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 4px 6px;
+}
+
+.model-selection-label {
+    font-size: 11px;
+    font-weight: 600;
+    color: #475569;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    white-space: nowrap;
+}
+
+.model-options-inline {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+}
+
+.model-option-compact {
+    display: flex;
+    align-items: center;
+    padding: 4px 8px;
+    border: 1px solid #e2e8f0;
+    border-radius: 6px;
+    background: white;
+    cursor: pointer;
+    transition: background-color 0.15s, border-color 0.15s;
+    white-space: nowrap;
+}
+
+.model-option-compact:hover {
+    background: #eff6ff;
+    border-color: #2563eb;
+}
+
+.model-option-compact input[type="radio"] {
+    margin: 0 5px 0 0;
+    cursor: pointer;
+}
+
+.model-name-compact {
+    font-size: 12px;
+    font-weight: 500;
+    color: #334155;
+    cursor: pointer;
+}
+
+.model-option-compact input[type="radio"]:checked + .model-name-compact {
+    color: #2563eb;
+}
+
+.model-option-compact:has(input[type="radio"]:checked) {
+    background: #eff6ff;
+    border-color: #2563eb;
+}
+
+.custom-model-input {
+    margin-top: 4px;
+    padding: 4px 6px;
+    background: white;
+    border-top: 1px solid #e2e8f0;
+    border-radius: 0 0 6px 6px;
+}
+
+.custom-model-input input[type="text"] {
+    width: 100%;
+    font-size: 12px;
+    font-family: monospace;
+}
+
+.custom-model-input input[type="text"]::placeholder {
+    color: #94a3b8;
+    font-style: italic;
+}
+
+/* ── Misc ───────────────────────────────────────────────────────── */
+.smallText {
+    font-size: 11px;
+    font-weight: 400;
+}
+
+/* ── Table ──────────────────────────────────────────────────────── */
 #flowTableContainer {
     font-size: 13px;
     line-height: 1.5;
@@ -134,120 +419,9 @@ H4 {
     text-decoration: underline;
 }
 
-.lds-dual-ring {
-    animation: rotation 3s infinite linear;
-    font-size: xx-large;
-    display: none;
-}
-@keyframes rotation {
-    from {
-        transform-origin: 50% 50%;
-        transform: rotate(0deg);
-    }
-    to {
-        transform-origin: 50% 50%;
-        transform: rotate(359deg);
-    }
-}
-
-.smallText {
-    font-size: x-small;
-}
-
-/* Model Selection Styles */
-.model-selection {
-    margin: 5px 0 5px 0;
-    border: 1px solid #e0e0e0;
-    border-radius: 8px;
-    padding: 2px;
-    background-color: #f9f9f9;
-}
-
-/* Inline layout for label and radio buttons */
-.model-selection-inline {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-}
-
-.model-selection-label {
-    font-weight: bold;
-    color: #333;
-    font-size: 14px;
-    white-space: nowrap;
-}
-
-.model-options-inline {
-    display: flex;
-    gap: 8px;
-    flex-wrap: wrap;
-}
-
-.model-option-compact {
-    display: flex;
-    align-items: center;
-    padding: 6px 10px;
-    border: 1px solid #ddd;
-    border-radius: 6px;
-    background-color: white;
-    cursor: pointer;
-    transition: all 0.2s ease;
-    white-space: nowrap;
-}
-
-.model-option-compact:hover {
-    background-color: #f0f8ff;
-    border-color: #4a90e2;
-}
-
-.model-option-compact input[type="radio"] {
-    margin: 0 6px 0 0;
-    cursor: pointer;
-}
-
-.model-name-compact {
-    font-weight: bold;
-    color: #333;
-    font-size: 13px;
-    cursor: pointer;
-}
-
-.model-option-compact input[type="radio"]:checked + .model-name-compact {
-    color: #4a90e2;
-}
-
-.model-option-compact:has(input[type="radio"]:checked) {
-    background-color: #e3f2fd;
-    border-color: #4a90e2;
-}
-
-/* Custom Model Input Styles */
-.custom-model-input {
-    margin-top: 4px;
-    padding: 4px;
-    background-color: #f8f9fa;
-    border: 1px solid #e0e0e0;
-    border-radius: 6px;
-}
-
-.custom-model-input input[type="text"] {
-    width: 100%;
-    padding: 6px 8px;
-    border: 1px solid #ddd;
-    border-radius: 4px;
-    font-size: 12px;
-    font-family: monospace;
-    background-color: white;
-    box-sizing: border-box;
-}
-
-.custom-model-input input[type="text"]:focus {
-    outline: none;
-    border-color: #4a90e2;
-    box-shadow: 0 0 0 2px rgba(74, 144, 226, 0.2);
-}
-
-.custom-model-input input[type="text"]::placeholder {
-    color: #999;
-    font-style: italic;
+/* ── Print ──────────────────────────────────────────────────────── */
+@media print {
+    @page { size: landscape; }
+    button { display: none; }
+    #flow { border: none !important; }
 }

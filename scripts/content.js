@@ -712,10 +712,10 @@ function displayTooltip( event, displayFlag ) {
         appendNodeAndLine( fieldsNode );
     } );
 
-    // add parameters if subflow
-    node.subflows?.forEach( anItem => { 
-        console.log( anItem );
-    } );
+    // // add parameters if subflow
+    // node.subflows?.forEach( anItem => { 
+    //     console.log( anItem );
+    // } );
     
     // add tooltip to the parent of the current flow element
     event.currentTarget.parentNode.appendChild( tooltip );

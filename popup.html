@@ -7,34 +7,34 @@
 <body>
     <div id="main">
         <div id="leftPanel">
-            <div id="defaultExplainer">
-            </div>
-            
-            <div id="flowExplainer" >
-                <div id="gptInputs" >
+            <div id="defaultExplainer"></div>
+
+            <div id="flowExplainer">
+                <div id="gptInputs">
                     <div id="gptDialogContainer" style="display: none;">
-                        <label for="gptQuestion">Ask your question or leave blank for default prompt:</label>
-                        <input id="gptQuestion" type="text" />
+                        <label for="gptQuestion">Ask a question, or leave blank for the default prompt:</label>
+                        <input id="gptQuestion" type="text" placeholder="e.g. What objects does this flow modify?" />
                         <button id="gptButton">Ask GPT</button>
                     </div>
                 </div>
-                <span id="error" style="font-weight: bold; color: red;" ></span>
-                <br />
+                <span id="error"></span>
                 <div id="spinner" class="lds-dual-ring">&#x263C;</div>
-                <span id="response" > </span>
+                <button id="copyButton" style="display: none;">Copy</button>
+                <span id="response"></span>
             </div>
         </div>
 
         <div id="rightPanel">
-            <div id="gpt" >
-                <label for="openAIKey" >OpenAI Key</label>
-                <input id="openAIKey" type="password" name="openAIKey" />
-                &nbsp;&nbsp;
-                <button id="setKey" >Set OpenAI key</button>
-                
+            <div id="gpt">
+                <div class="key-row">
+                    <label for="openAIKey">OpenAI Key</label>
+                    <input id="openAIKey" type="password" name="openAIKey" placeholder="sk-…" />
+                    <button id="setKey">Set key</button>
+                </div>
+
                 <div id="gptModelSelection" class="model-selection" style="display: none;">
                     <div class="model-selection-inline">
-                        <span class="model-selection-label">AI Model:</span>
+                        <span class="model-selection-label">Model</span>
                         <div class="model-options-inline">
                             <label class="model-option-compact">
                                 <input type="radio" name="gpt-version" value="gpt-4o" checked>
@@ -65,10 +65,12 @@
             </div>
         </div>
     </div>
-    <div id="flow" >
-        <button id="downloadButton" style="display: none;">Download Flow Definition in MarkDown Format</button>
+
+    <div id="flow">
+        <button id="downloadButton" style="display: none;">Download as Markdown</button>
         <div id="flowTableContainer" style="display: none;"></div>
     </div>
+
     <script src="./scripts/models.js"></script>
     <script src="./scripts/popup.js"></script>
 </body>

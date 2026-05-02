@@ -79,7 +79,8 @@ const dom = {
     gptQuestion: document.getElementById('gptQuestion'),
     flowTableContainer: document.getElementById('flowTableContainer'),
     downloadButton: document.getElementById('downloadButton'),
-    openAIKeyInput: document.querySelector('input#openAIKey')
+    openAIKeyInput: document.querySelector('input#openAIKey'),
+    copyButton: document.getElementById('copyButton')
 };
 
 class FlowParser {
@@ -653,7 +654,7 @@ class FlowParser {
         }
 
         // since we have OpenAI key, show the dialog container
-        dom.gptDialogContainer.style.display = 'block';
+        dom.gptDialogContainer.style.display = 'flex';
         // Load saved model preference or default to gpt-4o
         let savedModel = localStorage.getItem('selectedGPTModel') || CONFIG.MODELS.supported[0];
 
@@ -717,6 +718,7 @@ class FlowParser {
                 return;
             }
 
+            dom.copyButton.style.display = 'none';
             dom.response.innerText = 'Asking GPT to explain current flow...';
 
             // accept user question, otherwise use default prompt
@@ -757,6 +759,22 @@ chrome.runtime.onMessage.addListener(
 );
 
 dom.setKeyButton.addEventListener( 'click', function() { setKey(); } );
+
+dom.copyButton.addEventListener( 'click', () => {
+    copyViaExecCommand( dom.response.innerText );
+    dom.copyButton.textContent = 'Copied!';
+    setTimeout( () => { dom.copyButton.textContent = 'Copy'; }, 2000 );
+} );
+
+function copyViaExecCommand( text ) {
+    const el = document.createElement( 'textarea' );
+    el.value = text;
+    el.style.cssText = 'position:fixed;opacity:0;pointer-events:none';
+    document.body.appendChild( el );
+    el.select();
+    document.execCommand( 'copy' );
+    document.body.removeChild( el );
+}
 
 function createTableFromMarkDown( flowName, actionMap, stepByStepMDTable ) {
     let addAnchorFunction = function ( entireMatch, capturedStr ) {
@@ -876,6 +894,7 @@ function sendToGPT( dataObject, openAIKey ) {
             if( cacheAgeMs < CONFIG.CACHE_DURATION ) {
                 // display response 
                 dom.response.innerText = 'OpenAI (cached response): ' + parsedCachedResponse.parsedResponse;
+                dom.copyButton.style.display = 'inline-block';
                 dom.spinner.style.display = "none";
                 return;
             }
@@ -941,7 +960,7 @@ function sendToGPT( dataObject, openAIKey ) {
 
         let payload = JSON.stringify(payloadParams);
 
-        console.log( payload );
+        // console.log( payload );
 
         // prepare and send request
         fetch(modelCfg.endpoint, {
@@ -956,7 +975,7 @@ function sendToGPT( dataObject, openAIKey ) {
         .then(open_ai_response => {
 
             let parsedResponse = JSON.parse( open_ai_response );
-            console.log( parsedResponse );
+            // console.log( parsedResponse );
 
             if( parsedResponse.error ) {
                 parsedResponse = parsedResponse.error.message + ` (${parsedResponse.error.type})`;
@@ -1007,6 +1026,7 @@ function sendToGPT( dataObject, openAIKey ) {
             // display response 
             dom.response.innerText = parsedResponse;
             convertResponseFromMarkdown();
+            dom.copyButton.style.display = 'inline-block';
             dom.spinner.style.display = "none";
         })
         .catch(error => {
