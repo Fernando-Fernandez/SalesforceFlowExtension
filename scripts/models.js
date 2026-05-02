@@ -1,25 +1,31 @@
-// Default API parameters used for all models unless overridden below.
-const DEFAULT_CONFIG = {
-    tokenLimitParam: 'max_tokens',
-    temperature:     0.3,
-    top_p:           0.2
+const DEFAULT_MODEL_CONFIG = {
+    endpoint:          'https://api.openai.com/v1/chat/completions',
+    payloadStyle:      'messages',
+    tokenLimitParam:   'max_tokens',
+    maxTokens:         2000,
+    temperature:       0.3,
+    top_p:             0.2,
+    frequency_penalty: 0,
+    presence_penalty:  0
 };
 
-// Per-model overrides. Only specify what differs from DEFAULT_CONFIG.
-// Add a new entry here whenever a model requires non-standard parameters.
-const MODEL_OVERRIDES = {
-    'gpt-5-mini': {
-        tokenLimitParam: 'max_completion_tokens',
-        temperature:     1,
-        top_p:           1
-    },
-    'gpt-5-nano': {
-        tokenLimitParam: 'max_completion_tokens',
-        temperature:     1,
-        top_p:           1
-    }
+// Models whose ID starts with or contains one of these strings use the Responses API
+const RESPONSES_API_FAMILIES = ['gpt-5', 'o4-mini'];
+
+const RESPONSES_API_OVERRIDE = {
+    endpoint:        'https://api.openai.com/v1/responses',
+    payloadStyle:    'input',
+    tokenLimitParam: 'max_output_tokens',
+    maxTokens:       5000,
+    temperature:     1
 };
 
-export function getModelConfig( modelId ) {
-    return { ...DEFAULT_CONFIG, ...( MODEL_OVERRIDES[ modelId ] ?? {} ) };
+function getModelConfig( modelId ) {
+    const id = modelId.toLowerCase();
+    const usesResponsesApi = RESPONSES_API_FAMILIES.some(
+        family => id.startsWith( family ) || id.includes( family )
+    );
+    return usesResponsesApi
+        ? { ...DEFAULT_MODEL_CONFIG, ...RESPONSES_API_OVERRIDE }
+        : { ...DEFAULT_MODEL_CONFIG };
 }

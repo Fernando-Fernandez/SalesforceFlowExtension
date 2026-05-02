@@ -6,28 +6,16 @@ const CONFIG = {
     
     // GPT API Configuration
     GPT_PARAMS: {
-        temperature: 0.3,
-        top_p: 0.2,
-        max_tokens: 2000,
-        gpt5_max_tokens: 5000,
-        frequency_penalty: 0,
-        presence_penalty: 0,
         default_model: 'gpt-5-nano'
     },
-    
+
     // Data size limits for model selection
     DATA_LIMITS: {
         model_upgrade_threshold: 16200,    // chars - upgrade from gpt-5-nano to gpt-4o
         truncation_threshold: 130872,      // chars - hard limit for any model
         cache_key_substring_length: 20     // chars - for cache key generation
     },
-    
-    // API endpoints
-    ENDPOINTS: {
-        gpt5: "https://api.openai.com/v1/responses",
-        standard: "https://api.openai.com/v1/chat/completions"
-    },
-    
+
     // System prompts and messages
     PROMPTS: {
         default: `Your purpose is to help everyone quickly understand what this Salesforce flow does and how. Let us think step-by-step and briefly summarize the flow in the format: \\npurpose of the flow, the main objects queried/inserted/updated, dependencies (labels, hard-coded ids, values, emails, names, etc) from outside the flow, the main conditions it evaluates, and any potential or evident issues.\\nFLOW: \\n`,
@@ -54,8 +42,7 @@ const CONFIG = {
     
     // Model configurations
     MODELS: {
-        supported: ['gpt-4o', 'gpt-4.1', 'gpt-5-nano', 'gpt-5-mini'],
-        gpt5_temperature: 1  // GPT-5 models only support temperature = 1
+        supported: ['gpt-4o', 'gpt-4.1', 'gpt-5-nano', 'gpt-5-mini']
     },
     
     // Hash function constants
@@ -894,12 +881,6 @@ function sendToGPT( dataObject, openAIKey ) {
             }
         }
 
-        // use parameters recommended for Code Comment Generation
-        let temperature = CONFIG.GPT_PARAMS.temperature;
-        let top_p = CONFIG.GPT_PARAMS.top_p;
-        let max_tokens = CONFIG.GPT_PARAMS.max_tokens;
-        let frequency_penalty = CONFIG.GPT_PARAMS.frequency_penalty;
-        let presence_penalty = CONFIG.GPT_PARAMS.presence_penalty;
         let model = ( gptModel ? gptModel : CONFIG.GPT_PARAMS.default_model );
         let systemPrompt = CONFIG.PROMPTS.system;
 
@@ -928,57 +909,42 @@ function sendToGPT( dataObject, openAIKey ) {
         }
         
         // Update status message to show model being used
-        let statusMessage = modelUpgraded ? 
+        let statusMessage = modelUpgraded ?
             `Using ${model} (auto-upgraded from ${originalModel} due to data size)...` :
             `Using ${model}...`;
         dom.response.innerText = statusMessage;
 
-        // Determine if model is GPT-5 and adjust parameters accordingly
-        let isMoreRecentModel = model.toLowerCase().startsWith('gpt-5')
-                    || model.toLowerCase().includes('o4-mini');
-        let tokenLimitParam = isMoreRecentModel ? 'max_output_tokens' : 'max_tokens';
-        let modelTemperature = isMoreRecentModel ? CONFIG.MODELS.gpt5_temperature : temperature; // GPT-5 models only support temperature = 1
-        
-        // Build different payload structures for GPT-5 vs other models
+        const modelCfg = getModelConfig( model );
+
         let payloadParams;
-        let url;
-        
-        if (isMoreRecentModel) {
-            // GPT-5 uses different endpoint and payload structure
-            url = CONFIG.ENDPOINTS.gpt5;
-            max_tokens = CONFIG.GPT_PARAMS.gpt5_max_tokens;
-            let fullInput = `${systemPrompt}\n\n${prompt} ${data}`;
+        if ( modelCfg.payloadStyle === 'input' ) {
             payloadParams = {
-                model: model,
-                input: fullInput,
-                temperature: modelTemperature,
-                [tokenLimitParam]: max_tokens
+                model,
+                input: `${systemPrompt}\n\n${prompt} ${data}`,
+                temperature: modelCfg.temperature,
+                [modelCfg.tokenLimitParam]: modelCfg.maxTokens
             };
         } else {
-            // Standard chat completions for other models
-            url = CONFIG.ENDPOINTS.standard;
-            let sysMessage = `{"role":"system","content":[{"type":"text","text":"${systemPrompt}"}]}`;
-            let userMessage = `{"role":"user","content":[{"type":"text","text":"${prompt} ${data}"}]}`;
             payloadParams = {
-                model: model,
+                model,
                 messages: [
-                    JSON.parse(sysMessage), 
-                    JSON.parse(userMessage)
+                    { role: 'system', content: [{ type: 'text', text: systemPrompt }] },
+                    { role: 'user',   content: [{ type: 'text', text: `${prompt} ${data}` }] }
                 ],
-                temperature: modelTemperature,
-                [tokenLimitParam]: max_tokens,
-                top_p: top_p,
-                frequency_penalty: frequency_penalty,
-                presence_penalty: presence_penalty
+                temperature: modelCfg.temperature,
+                [modelCfg.tokenLimitParam]: modelCfg.maxTokens,
+                top_p: modelCfg.top_p,
+                frequency_penalty: modelCfg.frequency_penalty,
+                presence_penalty: modelCfg.presence_penalty
             };
         }
-        
+
         let payload = JSON.stringify(payloadParams);
 
         console.log( payload );
 
         // prepare and send request
-        fetch(url, {
+        fetch(modelCfg.endpoint, {
             method: "POST",
             headers: {
                 "Content-Type": "application/json",
@@ -994,7 +960,7 @@ function sendToGPT( dataObject, openAIKey ) {
 
             if( parsedResponse.error ) {
                 parsedResponse = parsedResponse.error.message + ` (${parsedResponse.error.type})`;
-            } else if (isMoreRecentModel) {
+            } else if (modelCfg.payloadStyle === 'input') {
                 // Check finish reason for GPT-5 with proper guard clauses
                 let responseText = null;
                 
