@@ -9,7 +9,20 @@ const TOOLING_API_VERSION = 'v57.0';
 const BUTTON_STYLE = "background-color: blueviolet!important; color: white!important; \
 margin-right: 30px; ";
 
+const TOOLTIP_CONFIG = {
+    autoLayout: {
+        start: { offsetHorizontal: 400, offsetVertical: 0, arrowYDistance: 65, arrowWidth: 200 },
+        node:  { offsetHorizontal: 320, offsetVertical: 0, arrowYDistance: 60, arrowWidth: 200 }
+    },
+    freeForm: {
+        start: { offsetHorizontal: 200, offsetVertical: 0, arrowYDistance: 98, arrowWidth: 100 },
+        node:  { offsetHorizontal: 135, offsetVertical: 0, arrowYDistance:  1, arrowWidth: 100 }
+    }
+};
+const TOOLTIP_DEBOUNCE_MS = 120;
+
 let sfHost, sessionId, flowDefinition;
+let tooltipTimer;
 
 // only execute event setup if within a Salesforce page
 let sfElement = document.querySelector( "body.sfdcBody, body.ApexCSIPage, #auraLoadingBox" );
@@ -165,12 +178,14 @@ function addHoverEvents() {
 
         // copy title from original node into data structure
         flowShape.dataset.flowElementName = flowElementName;
-        flowShape.addEventListener( "mouseover", ( event ) => {
-            displayTooltip( event, true );
+        flowShape.addEventListener( "mouseenter", ( event ) => {
+            const target = event.currentTarget;
+            clearTimeout( tooltipTimer );
+            tooltipTimer = setTimeout( () => displayTooltip( { currentTarget: target }, true ), TOOLTIP_DEBOUNCE_MS );
         } );
 
-        flowShape.addEventListener( "mouseout", ( event ) => {
-            // remove tooltip
+        flowShape.addEventListener( "mouseleave", ( event ) => {
+            clearTimeout( tooltipTimer );
             displayTooltip( event, false );
         } );
     }
@@ -385,12 +400,13 @@ function removeHTML( aValue ) {
 }
 
 // destructured parameters with defaults
-function createTooltip( { 
+function createTooltip( {
             elementName = 'This flow: '
             , currentTarget = ''
-            , offsetHorizontal = 350
+            , offsetHorizontal
             , offsetVertical = 0
             , arrowYDistance = 65
+            , arrowWidth = 200
         } = {} ) {
     // read flow element position and add offset
     let leftPos = offsetHorizontal + parseInt( currentTarget.style.left );
@@ -410,11 +426,10 @@ function createTooltip( {
     currentTarget.parentNode.appendChild( tooltip );
 
     arrow = document.createElement( "div" );
-    const distanceX = 200, distanceY = 10; // auto-layout should result in top -65, left 50 (with width 350)
-    arrow.setAttribute( "style", "width: " + distanceX + "px; height: 25px; \
+    arrow.setAttribute( "style", "width: " + arrowWidth + "px; height: 25px; \
 background-color: darkgray; z-index: 998; position: relative; \
 clip-path: polygon(0% 50%, 15px 0%, 15px 47%, 100% 47%, 100% 53%, 15px 53%, 15px 100% ); \
-top: " + ( topPos - arrowYDistance ) + "px; left: " + ( leftPos - distanceX ) + "px;" );
+top: " + ( topPos - arrowYDistance ) + "px; left: " + ( leftPos - arrowWidth ) + "px;" );
     currentTarget.parentNode.appendChild( arrow );
 }
 
@@ -465,22 +480,11 @@ function displayTooltip( event, displayFlag ) {
 
         if( descriptionArray.length > 0 ) {
             if( autoLayout ) {
-                createTooltip( { 
-                    elementName: 'This flow: '
-                    , currentTarget: event.currentTarget
-                    , offsetHorizontal: 350
-                    , offsetVertical: 0
-                    , arrowYDistance: 65
-                } );
-
+                createTooltip( { elementName: 'This flow: ', currentTarget: event.currentTarget
+                    , ...TOOLTIP_CONFIG.autoLayout.start } );
             } else {
-                createTooltip( { 
-                    elementName: 'This flow: '
-                    , currentTarget: event.currentTarget
-                    , offsetHorizontal: 400
-                    , offsetVertical: 0
-                    , arrowYDistance: 98 //121
-                } );
+                createTooltip( { elementName: 'This flow: ', currentTarget: event.currentTarget
+                    , ...TOOLTIP_CONFIG.freeForm.start } );
             }
 
             descriptionArray.forEach( aDescription => {
@@ -509,22 +513,11 @@ function displayTooltip( event, displayFlag ) {
     }
 
     if( autoLayout ) {
-        createTooltip( { 
-            elementName: elementName
-            , currentTarget: event.currentTarget
-            , offsetHorizontal: 270
-            , offsetVertical: 0
-            , arrowYDistance: 60
-        } );
-
+        createTooltip( { elementName, currentTarget: event.currentTarget
+            , ...TOOLTIP_CONFIG.autoLayout.node } );
     } else {
-        createTooltip( { 
-            elementName: elementName
-            , currentTarget: event.currentTarget
-            , offsetHorizontal: 270
-            , offsetVertical: 0
-            , arrowYDistance: 1
-        } );
+        createTooltip( { elementName, currentTarget: event.currentTarget
+            , ...TOOLTIP_CONFIG.freeForm.node } );
     }
 
     // get subflow name if calling subflow
