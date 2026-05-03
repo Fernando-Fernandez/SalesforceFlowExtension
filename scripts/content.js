@@ -9,17 +9,13 @@ const TOOLING_API_VERSION = 'v57.0';
 const BUTTON_STYLE = "background-color: blueviolet!important; color: white!important; \
 margin-right: 30px; ";
 
-const TOOLTIP_CONFIG = {
-    autoLayout: {
-        start: { offsetHorizontal: 400, offsetVertical: 0, arrowYDistance: 65, arrowWidth: 200 },
-        node:  { offsetHorizontal: 320, offsetVertical: 0, arrowYDistance: 60, arrowWidth: 200 }
-    },
-    freeForm: {
-        start: { offsetHorizontal: 200, offsetVertical: 0, arrowYDistance: 98, arrowWidth: 100 },
-        node:  { offsetHorizontal: 135, offsetVertical: 0, arrowYDistance:  1, arrowWidth: 100 }
-    }
-};
 const TOOLTIP_DEBOUNCE_MS = 120;
+const ARROW_WIDTH_AUTO = 80;
+const ARROW_WIDTH_FREE = 138;
+const ARROW_HEIGHT = 25;
+const TOOLTIP_GAP  = 2;
+const ARROW_OFFSET_AUTO = 70;
+const ARROW_OFFSET_FREE = 0;
 
 let sfHost, sessionId, flowDefinition;
 let tooltipTimer;
@@ -71,7 +67,7 @@ let getNodesTimeout;
 function waitForFlowUI() {
     // attempt to get list of flow nodes repeatedly, in both auto-layout and free-form modes
     let flowShapes = document.querySelectorAll( 
-                        "div.node-container, span.text-element-label,div.start-node-box" );
+                        "div.element-card, span.text-element-label, div.start-node-box, div.node-container" );
     if( flowShapes.length <= 0 ) {
         // nodes not created, try again in 2 secs
         getNodesTimeout = setTimeout( () => {
@@ -149,7 +145,7 @@ function showDefinition( showDefinitionButton ) {
 function addHoverEvents() {
     // attempt to get list of flow nodes repeatedly, in both auto-layout and free-form modes
     let flowShapes = document.querySelectorAll( 
-                        "div.node-container, span.text-element-label,div.start-node-box" );
+                        "div.element-card, span.text-element-label, div.start-node-box, div.node-container" );
     if( flowShapes.length <= 0 ) {
         // nodes not created, try again in 2 secs
         getNodesTimeout = setTimeout( () => {
@@ -160,17 +156,24 @@ function addHoverEvents() {
 
     clearTimeout( getNodesTimeout );
 
-    // add mouse over/out events to each of the flow nodes
+    // add mouse enter/leave events to each of the flow nodes
     for( let i = 0; i < flowShapes.length; i++ ) {
         let flowShape = flowShapes[ i ];
-        let flowElementName = flowShape.title;
+        let flowElementName;
 
-        // if flow in free-form mode, get element name from text
-        if( flowShape.nodeName == 'SPAN' ) {
+        if( flowShape.nodeName === 'SPAN' ) {
+            // free-form only — skip SPANs that live inside an element-card (auto-layout)
+            if( flowShape.closest( 'div.element-card' ) ) continue;
             flowElementName = flowShape.textContent;
             flowShape = flowShape.parentNode.parentElement.parentElement.parentElement;
+        } else if( flowShape.classList.contains( 'element-card' ) ) {
+            // auto-layout: read name from inner label, then step up to the node container
+            // so the listener covers the SVG icon sibling as well as the card
+            flowElementName = flowShape.querySelector( 'span.text-element-label' )?.textContent?.trim();
+            flowShape = flowShape.parentElement;
         } else {
-            // if flow is in auto-layout mode, extract element name from within double quotes
+            // start-node-box fallback: name may be in the title attribute
+            flowElementName = flowShape.title;
             if( flowElementName && flowElementName.indexOf( '"' ) > -1 ) {
                 flowElementName = flowElementName.match( /"(.*?)"/ )[ 1 ];
             }
@@ -399,38 +402,40 @@ function removeHTML( aValue ) {
     return aValue.replaceAll( /\<\/?.*?\>/g, '' );
 }
 
-// destructured parameters with defaults
 function createTooltip( {
             elementName = 'This flow: '
             , currentTarget = ''
-            , offsetHorizontal
-            , offsetVertical = 0
-            , arrowYDistance = 65
-            , arrowWidth = 200
+            , arrowWidth = ARROW_WIDTH_AUTO
+            , arrowOffset = ARROW_OFFSET_AUTO
         } = {} ) {
-    // read flow element position and add offset
-    let leftPos = offsetHorizontal + parseInt( currentTarget.style.left );
-    leftPos = isNaN( leftPos ) ? offsetHorizontal : leftPos;
-    let topPos = offsetVertical + parseInt( currentTarget.style.top );
-    topPos = isNaN( topPos ) ? offsetVertical : topPos;
+    const rect = currentTarget.getBoundingClientRect();
+
+    // Arrow tip at element's right edge, vertically centered on element
+    const arrowLeft = rect.right + arrowOffset;
+    const arrowTop  = rect.top + rect.height / 2;
+
+    // Tooltip immediately right of arrow tail
+    const tooltipLeft = arrowLeft + arrowWidth + TOOLTIP_GAP;
+    const tooltipTop  = rect.top;
+
     tooltip = document.createElement( "div" );
-    tooltip.setAttribute( "style", "border: solid 1px darkgray; word-wrap: break-word; white-space: normal; " 
-                                    + "background-color: lightyellow; width:30em; " 
-                                    + "position: absolute; z-index: 999; "
-                                    + "top: " + topPos + "px; left: " + leftPos + "px;" );
+    tooltip.setAttribute( "style", "border: solid 1px gray; word-wrap: break-word; white-space: normal; "
+                                    + "background-color: lightyellow; width: 30em; "
+                                    + "position: fixed; z-index: 9999; "
+                                    + "top: " + tooltipTop + "px; left: " + tooltipLeft + "px;" );
     let titleNode = document.createTextNode( elementName );
     let boldNode = document.createElement( "strong" );
     boldNode.appendChild( titleNode );
     appendNodeAndLine( boldNode );
 
-    currentTarget.parentNode.appendChild( tooltip );
-
     arrow = document.createElement( "div" );
-    arrow.setAttribute( "style", "width: " + arrowWidth + "px; height: 25px; \
-background-color: darkgray; z-index: 998; position: relative; \
-clip-path: polygon(0% 50%, 15px 0%, 15px 47%, 100% 47%, 100% 53%, 15px 53%, 15px 100% ); \
-top: " + ( topPos - arrowYDistance ) + "px; left: " + ( leftPos - arrowWidth ) + "px;" );
-    currentTarget.parentNode.appendChild( arrow );
+    arrow.setAttribute( "style", "width: " + arrowWidth + "px; height: " + ARROW_HEIGHT + "px; "
+                                    + "background-color: gray; z-index: 9998; position: fixed; "
+                                    + "clip-path: polygon(0% 50%, 15px 0%, 15px 47%, 100% 47%, 100% 53%, 15px 53%, 15px 100%); "
+                                    + "top: " + arrowTop + "px; left: " + arrowLeft + "px;" );
+
+    document.body.appendChild( tooltip );
+    document.body.appendChild( arrow );
 }
 
 let tooltip, arrow;
@@ -479,13 +484,9 @@ function displayTooltip( event, displayFlag ) {
         let descriptionArray = indexElementsAndReturnDescription( definitionMap );
 
         if( descriptionArray.length > 0 ) {
-            if( autoLayout ) {
-                createTooltip( { elementName: 'This flow: ', currentTarget: event.currentTarget
-                    , ...TOOLTIP_CONFIG.autoLayout.start } );
-            } else {
-                createTooltip( { elementName: 'This flow: ', currentTarget: event.currentTarget
-                    , ...TOOLTIP_CONFIG.freeForm.start } );
-            }
+            createTooltip( { elementName: 'This flow: ', currentTarget: event.currentTarget
+                , arrowWidth: autoLayout ? ARROW_WIDTH_AUTO : ARROW_WIDTH_FREE
+                , arrowOffset: autoLayout ? ARROW_OFFSET_AUTO : ARROW_OFFSET_FREE } );
 
             descriptionArray.forEach( aDescription => {
                 let descriptionNode = document.createTextNode( ' - ' + aDescription );
@@ -512,13 +513,9 @@ function displayTooltip( event, displayFlag ) {
         return;
     }
 
-    if( autoLayout ) {
-        createTooltip( { elementName, currentTarget: event.currentTarget
-            , ...TOOLTIP_CONFIG.autoLayout.node } );
-    } else {
-        createTooltip( { elementName, currentTarget: event.currentTarget
-            , ...TOOLTIP_CONFIG.freeForm.node } );
-    }
+    createTooltip( { elementName, currentTarget: event.currentTarget
+        , arrowWidth: autoLayout ? ARROW_WIDTH_AUTO : ARROW_WIDTH_FREE
+        , arrowOffset: autoLayout ? ARROW_OFFSET_AUTO : ARROW_OFFSET_FREE } );
 
     // get subflow name if calling subflow
     try {
@@ -710,6 +707,4 @@ function displayTooltip( event, displayFlag ) {
     //     console.log( anItem );
     // } );
     
-    // add tooltip to the parent of the current flow element
-    event.currentTarget.parentNode.appendChild( tooltip );
 }
