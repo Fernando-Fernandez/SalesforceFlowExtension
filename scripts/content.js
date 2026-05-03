@@ -25,7 +25,7 @@ let sfElement = document.querySelector( "body.sfdcBody, body.ApexCSIPage, #auraL
 if( sfElement ) {
     // get host and session from background script
     let getHostMessage = { message: GETHOSTANDSESSION
-        , url: location.href 
+        , url: location.href
     };
     chrome.runtime.sendMessage( getHostMessage, resultData => {
         //console.log( resultData );
@@ -66,7 +66,7 @@ function setFlowDefinitionFromToolingAPI( baseUrl, sessionId ) {
 let getNodesTimeout;
 function waitForFlowUI() {
     // attempt to get list of flow nodes repeatedly, in both auto-layout and free-form modes
-    let flowShapes = document.querySelectorAll( 
+    let flowShapes = document.querySelectorAll(
                         "div.element-card, span.text-element-label, div.start-node-box, div.node-container" );
     if( flowShapes.length <= 0 ) {
         // nodes not created, try again in 2 secs
@@ -92,8 +92,8 @@ function addShowDefinitionButton() {
     showDefinitionButton.innerText = "View Definition (Flow Extension)";
     flowComboBox.parentElement.insertBefore( showDefinitionButton, flowComboBox );
 
-    showDefinitionButton.addEventListener( "click", function() { 
-        showDefinition( showDefinitionButton ); 
+    showDefinitionButton.addEventListener( "click", function() {
+        showDefinition( showDefinitionButton );
     } );
 }
 
@@ -103,7 +103,7 @@ function showDefinition( showDefinitionButton ) {
     let flowIframe = document.getElementById( "flowIframe" );
 
     if( ! flowIframe ) {
-        let flowContainer = document.querySelector( 
+        let flowContainer = document.querySelector(
                             "div.slds-col.slds-grow.slds-grid.slds-is-relative.slds-scrollable_none" );
         // append iframe
         let popupSrc = chrome.runtime.getURL( "popup.html" );
@@ -144,7 +144,7 @@ function showDefinition( showDefinitionButton ) {
 
 function addHoverEvents() {
     // attempt to get list of flow nodes repeatedly, in both auto-layout and free-form modes
-    let flowShapes = document.querySelectorAll( 
+    let flowShapes = document.querySelectorAll(
                         "div.element-card, span.text-element-label, div.start-node-box, div.node-container" );
     if( flowShapes.length <= 0 ) {
         // nodes not created, try again in 2 secs
@@ -195,10 +195,7 @@ function addHoverEvents() {
 }
 
 function findNodeByNameInArray( elementName, array ) {
-    if( array && array.length < 0 ) {
-        return null;
-    }
-    return array.find( aNode => aNode.label === elementName );
+    return array?.find( aNode => aNode.label === elementName ) ?? null;
 }
 
 function appendNodeAndLine( aNode ) {
@@ -218,7 +215,7 @@ function indexElementsAndReturnDescription( definitionMap ) {
     const screenMap = new Map();
     const decisionMap = new Map();
     definitionMap.forEach( ( value, key ) => {
-        value.forEach( aNode => { 
+        value.forEach( aNode => {
             // get the node that the current node is pointing to
             let targetName = aNode.connector?.targetReference;
 
@@ -232,8 +229,8 @@ function indexElementsAndReturnDescription( definitionMap ) {
                 targetName = aNode.defaultConnector?.targetReference;
             }
             const faultTargetName = aNode.faultConnector?.targetReference;
-            const newNode = { 
-                ...aNode 
+            const newNode = {
+                ...aNode
                 , type:  key
                 , targetName:  targetName
                 , faultTargetName:  faultTargetName
@@ -244,13 +241,13 @@ function indexElementsAndReturnDescription( definitionMap ) {
             // create text for screen describing the inputs/outputs
             if( key === 'screens' ) {
                 const inputFields = aNode.fields.filter( aField => aField.fieldType !== "DisplayText" )
-                                            .map( aField => aField.fieldText ?? 
+                                            .map( aField => aField.fieldText ??
                                                                 aField.name ?? aField.extensionName )
                                             .join( ", " );
-                const displayFields = aNode.fields.filter( aField => ( aField.fieldType == "ComponentInstance" 
-                                                                        || aField.fieldType == "DisplayText" ) 
+                const displayFields = aNode.fields.filter( aField => ( aField.fieldType == "ComponentInstance"
+                                                                        || aField.fieldType == "DisplayText" )
                                                                     && aField.fieldText )
-                                            .map( aField => aField.fieldText ?? 
+                                            .map( aField => aField.fieldText ??
                                                                 aField.name ?? aField.extensionName )
                                             .join( ", " );
                 const description = ( displayFields ? "displaying:  " + removeHTML( displayFields ) : "" )
@@ -261,7 +258,7 @@ function indexElementsAndReturnDescription( definitionMap ) {
 
             if( key === 'decisions' ) {
                 // TODO:  describe individual branches
-                const description = "checking these conditions:  " 
+                const description = "checking these conditions:  "
                                 + aNode.label + ' - ' + aNode.rules.map( aRule => aRule.label ).join( ", " );
                 decisionMap.set( aNode.name, description );
             }
@@ -275,8 +272,8 @@ function indexElementsAndReturnDescription( definitionMap ) {
     let descriptionArray = [];
 
     // follow the flow element sequence and create descriptions at relevant points
-    let startingElement = flowDefinition.startElementReference ?? 
-                            flowDefinition.start?.connector?.targetReference ?? 
+    let startingElement = flowDefinition.startElementReference ??
+                            flowDefinition.start?.connector?.targetReference ??
                             flowDefinition.start?.scheduledPaths[ 0 ].connector?.targetReference;
     let currentNode = nodeMap.get( startingElement );
     let lastDecisionNode, lastDecisionNodeWithPendingBranches;
@@ -293,7 +290,7 @@ function indexElementsAndReturnDescription( definitionMap ) {
         }
 
         // check if non-decision node has already been visited
-        if( nextNode && nextNode.visitCount > 0 
+        if( nextNode && nextNode.visitCount > 0
                 && nextNode.type !== 'decisions' && nextNode.type !== 'loops' ) {
             // node has already been visited, so we're in a loop and can exit
             break;
@@ -373,9 +370,9 @@ function indexElementsAndReturnDescription( definitionMap ) {
                             + ( nextNode.type === 'recordDeletes' ? 'deletes ' : '' );
         let targetOfAction = nextNode.object ?? nextNode.inputReference;
         let description = ( recordAction ? recordAction + targetOfAction + ' record ' : '' )
-                        + ( nextNode.type === 'actionCalls' ? 'calls action ' 
+                        + ( nextNode.type === 'actionCalls' ? 'calls action '
                                         + nextNode.actionName + " (" + nextNode.actionType + ") " : '' )
-                        + ( nextNode.type === 'subflows' ? 'calls flow ' 
+                        + ( nextNode.type === 'subflows' ? 'calls flow '
                                         + nextNode.name + " (" + nextNode.flowName + ") " : '' );;
         if( lastScreenNode ) {
             description = description + "after " + screenMap.get( lastScreenNode.name );
@@ -439,272 +436,157 @@ function createTooltip( {
 }
 
 let tooltip, arrow;
+
+function appendLine( text ) {
+    appendNodeAndLine( document.createTextNode( text ) );
+}
+
+const RECORD_OP_LABEL = {
+    recordCreates:  'Creation',
+    recordUpdates:  'Update',
+    recordLookups:  'Lookup',
+    recordDeletes:  'Delete',
+};
+
+const COLLECTION_PROCESSOR_LABEL = {
+    SortCollectionProcessor:               'Sort',
+    FilterCollectionProcessor:             'Filter',
+    RecommendationMapCollectionProcessor:  'Recommendation Map',
+};
+
+function renderRecordOperation( node ) {
+    if( node.object )                           appendLine( 'Object:  ' + node.object );
+    const opLabel = RECORD_OP_LABEL[ node.type ];
+    if( opLabel )                               appendLine( `Action:  Record ${opLabel}` );
+    if( node.inputReference )                   appendLine( 'Input:  ' + node.inputReference );
+    if( node.getFirstRecordOnly )               appendLine( 'Only first record:  ' + node.getFirstRecordOnly );
+    if( node.assignNullValuesIfNoRecordsFound ) appendLine( 'Assign null if no records:  ' + node.assignNullValuesIfNoRecordsFound );
+    if( node.assignRecordIdToReference )        appendLine( 'Assign record id to:  ' + node.assignRecordIdToReference );
+    if( node.inputAssignments?.length ) {
+        appendLine( 'Input Assignments:' );
+        node.inputAssignments.forEach( f => appendLine( ( f.field ?? f.name ) + ' = ' + getValue( f.value ) ) );
+    }
+    if( node.outputAssignments?.length ) {
+        appendLine( 'Output Assignments:' );
+        node.outputAssignments.forEach( f => appendLine( ( f.field ?? f.name ) + ' = ' + getValue( f.value ) ) );
+    }
+    if( node.filters?.length ) {
+        appendLine( 'Filters:' );
+        node.filters.forEach( f => appendLine( f.field
+            + ' ' + ( f.operator === 'EqualTo' ? '=' : f.operator ) + ' '
+            + getValue( f.value ) ) );
+    }
+}
+
+const typeRenderers = {
+    subflows( node ) {
+        if( node.flowName ) appendLine( `(${node.flowName})` );
+    },
+    transforms( node ) {
+        appendLine( `(${ node.objectType ?? node.dataType })` );
+        node.transformValues?.forEach( tv => {
+            tv.transformValueActions?.forEach( action => {
+                const val = getValue( action.value );
+                appendLine( action.transformType + ': '
+                    + ( val ?? 'formula' )
+                    + ( action.outputFieldApiName ? ' to ' + action.outputFieldApiName : '' ) );
+            } );
+        } );
+    },
+    screens( node ) {
+        node.fields?.forEach( field => {
+            let text = field.fieldText;
+            if( field.fieldType === 'DisplayText' ) {
+                text = removeHTML( text );
+            } else if( field.fieldType === 'ComponentInstance' ) {
+                text = field.inputParameters?.reduce( ( acc, p ) => acc + getValue( p.value ) + ', ', '' );
+                text = ( text !== '' ? text : field.name ?? field.extensionName );
+            }
+            if( ! text ) {
+                const out = field.outputParameters?.reduce( ( acc, p ) => acc + ' / ' + getValue( p ) + ' = ' + p.name, '' ) ?? '';
+                text = out.length > 2 ? out.substring( 2 ) : out;
+            }
+            appendLine( `${field.fieldType}: ${text}` );
+        } );
+    },
+    actionCalls( node ) {
+        appendLine( `${node.actionName} (${node.actionType})` );
+        node.inputParameters?.forEach( p => appendLine( ( p.field ?? p.name ) + ' = ' + getValue( p.value ) ) );
+    },
+    collectionProcessors( node ) {
+        appendLine( `Type:  ${ COLLECTION_PROCESSOR_LABEL[ node.collectionProcessorType ] ?? '' }` );
+        const sortStr = node.sortOptions?.reduce( ( acc, s ) => acc + s.sortField + ' ' + s.sortOrder + ', ', 'Sort Order:  ' );
+        if( sortStr ) appendLine( sortStr );
+        if( node.collectionReference ) appendLine( `Collection:  ${node.collectionReference}` );
+    },
+    loops( node ) {
+        if( node.collectionReference ) appendLine( `Loop collection:  ${node.collectionReference}` );
+    },
+    decisions( node ) {
+        node.rules?.forEach( rule => {
+            appendLine( rule.label );
+            rule.conditions?.forEach( cond => appendLine( cond.leftValueReference
+                + ' ' + ( cond.operator === 'EqualTo' ? '=' : cond.operator ) + ' '
+                + getValue( cond.rightValue ) ) );
+        } );
+    },
+    assignments( node ) {
+        node.assignmentItems?.forEach( item => appendLine( item.assignToReference
+            + ' ' + ( item.operator === 'Assign' ? '=' : item.operator === 'Add' ? 'appended with' : '' )
+            + ' ' + getValue( item.value ) ) );
+    },
+};
+[ 'recordCreates', 'recordUpdates', 'recordDeletes', 'recordLookups' ].forEach( t => {
+    typeRenderers[ t ] = renderRecordOperation;
+} );
+
+function buildDefinitionMap() {
+    return new Map(
+        Object.entries( flowDefinition ).filter( ( [, v] ) => Array.isArray( v ) )
+    );
+}
+
 function displayTooltip( event, displayFlag ) {
-    if( ! flowDefinition ) {
-        return;
-    }
-    // remove old tooltip
-    if( tooltip ) {
-        tooltip.remove();
-        arrow.remove();
-    }
+    if( ! flowDefinition ) return;
 
-    // if flag = false, keep it without tooltip
-    if( ! displayFlag ) {
-        return;
-    }
+    if( tooltip ) { tooltip.remove(); arrow.remove(); }
+    if( ! displayFlag ) return;
 
-    // determine layout of canvas
     const layout = flowDefinition.processMetadataValues[ 1 ].value.stringValue;
-    const autoLayout = ( layout == 'AUTO_LAYOUT_CANVAS' );
+    const autoLayout = ( layout === 'AUTO_LAYOUT_CANVAS' );
+    const arrowParams = {
+        arrowWidth: autoLayout ? ARROW_WIDTH_AUTO : ARROW_WIDTH_FREE,
+        arrowOffset: autoLayout ? ARROW_OFFSET_AUTO : ARROW_OFFSET_FREE,
+    };
 
-    // collect nodes in the flow metadata and index them in a map
-    const definitionMap = new Map( [
-        [ 'recordCreates', flowDefinition.recordCreates ]
-        , [ 'recordUpdates', flowDefinition.recordUpdates ]
-        , [ 'recordDeletes', flowDefinition.recordDeletes ]
-        , [ 'recordLookups', flowDefinition.recordLookups ]
-        , [ 'transforms', flowDefinition.transforms ]
-        , [ 'decisions', flowDefinition.decisions ]
-        , [ 'subflows', flowDefinition.subflows ]
-        , [ 'screens', flowDefinition.screens ]
-        , [ 'actionCalls', flowDefinition.actionCalls ]
-        , [ 'assignments', flowDefinition.assignments ]
-        , [ 'loops', flowDefinition.loops ]
-        , [ 'collectionProcessors', flowDefinition.collectionProcessors ]
-    ] );
+    const definitionMap = buildDefinitionMap();
 
-    // tooltip on the start flow element
-    const containsStart = event.currentTarget.children?.[0]?.children?.[1]?.children?.[1]?.innerText == 'Start'
-                    || event.currentTarget.children?.[1]?.children?.[1]?.children?.[1]?.innerText == 'Start'
+    const containsStart = event.currentTarget.children?.[0]?.children?.[1]?.children?.[1]?.innerText === 'Start'
+                    || event.currentTarget.children?.[1]?.children?.[1]?.children?.[1]?.innerText === 'Start';
     const isStartElement = event.currentTarget.className === 'start-node-box'
                     || ( autoLayout && containsStart );
 
     if( isStartElement ) {
-        let descriptionArray = indexElementsAndReturnDescription( definitionMap );
-
+        const descriptionArray = indexElementsAndReturnDescription( definitionMap );
         if( descriptionArray.length > 0 ) {
-            createTooltip( { elementName: 'This flow: ', currentTarget: event.currentTarget
-                , arrowWidth: autoLayout ? ARROW_WIDTH_AUTO : ARROW_WIDTH_FREE
-                , arrowOffset: autoLayout ? ARROW_OFFSET_AUTO : ARROW_OFFSET_FREE } );
-
-            descriptionArray.forEach( aDescription => {
-                let descriptionNode = document.createTextNode( ' - ' + aDescription );
-                appendNodeAndLine( descriptionNode );
-            } );
+            createTooltip( { elementName: 'This flow: ', currentTarget: event.currentTarget, ...arrowParams } );
+            descriptionArray.forEach( d => appendLine( ' - ' + d ) );
         }
         return;
     }
 
-    // handle flows in auto-layout or free-form
-    let elementName = event.currentTarget.dataset.flowElementName;
-
-    // find element node in the flow metadata
+    const elementName = event.currentTarget.dataset.flowElementName;
     let node;
     for( const [key, value] of definitionMap ) {
         node = findNodeByNameInArray( elementName, value );
-        if( node ) {
-            node.type = key;
-            break;
-        }
+        if( node ) { node.type = key; break; }
     }
+    if( ! node ) return;
 
-    if( ! node ) {
-        return;
-    }
+    createTooltip( { elementName, currentTarget: event.currentTarget, ...arrowParams } );
 
-    createTooltip( { elementName, currentTarget: event.currentTarget
-        , arrowWidth: autoLayout ? ARROW_WIDTH_AUTO : ARROW_WIDTH_FREE
-        , arrowOffset: autoLayout ? ARROW_OFFSET_AUTO : ARROW_OFFSET_FREE } );
+    if( node.elementSubtype ) appendLine( `(${node.elementSubtype})` );
 
-    // get subflow name if calling subflow
-    try {
-        let subflowName = node.flowName;
-        if( subflowName ) {
-            let subflowNode = document.createTextNode( `(${subflowName})` );
-            appendNodeAndLine( subflowNode );
-        }
-    } catch( e ) {
-    }
-
-    // handle elementSubtype
-    try {
-        let elementSubtype = node.elementSubtype;
-        if( elementSubtype ) {
-            let subTypeNode = document.createTextNode( `(${elementSubtype})` );
-            appendNodeAndLine( subTypeNode );
-        }
-    } catch( e ) {
-    }
-
-    // handle transforms
-    if( node.type == 'transforms' ) {
-        let dataType = node.dataType;
-        let objectType = node.objectType;
-        let dataTypeNode = document.createTextNode( `(${ objectType ?? dataType })` );
-        appendNodeAndLine( dataTypeNode );
-
-        node.transformValues?.forEach( aTransformValue => {
-            aTransformValue?.transformValueActions.forEach( aTransformAction => {
-                let aValue = getValue( aTransformAction.value );
-                let transformDescription = aTransformAction.transformType + ': ' 
-                            + ( aValue ? aValue : 'formula' )
-                            + ( aTransformAction.outputFieldApiName ? ' to ' + aTransformAction.outputFieldApiName : '' );
-                let transformNode = document.createTextNode( transformDescription );
-                appendNodeAndLine( transformNode );
-            } );
-        } );
-    }
-
-    // add field assignments if creating record
-    if( node.inputAssignments && node.inputAssignments.length > 0 ) {
-        let inputHeader = document.createTextNode( "Input Assignments:  " );
-        appendNodeAndLine( inputHeader );
-        node.inputAssignments?.forEach( aField => {
-            let assignDescription = ( aField.field ?? aField.name ) + ' = ' + getValue( aField.value );
-            let assignmentNode = document.createTextNode( assignDescription );
-            appendNodeAndLine( assignmentNode );
-        } );
-    }
-
-    if( node.outputAssignments && node.outputAssignments.length > 0 ) {
-        let outputHeader = document.createTextNode( "Output Assignments:  " );
-        appendNodeAndLine( outputHeader );
-        node.outputAssignments?.forEach( aField => {
-            let assignDescription = ( aField.field ?? aField.name ) + ' = ' + getValue( aField.value );
-            let assignmentNode = document.createTextNode( assignDescription );
-            appendNodeAndLine( assignmentNode );
-        } );
-    }
-    
-    // add fields if screen element
-    node.fields?.forEach( aField => {
-        let fieldText = aField.fieldText;
-
-        if( aField.fieldType === "DisplayText" ) {
-            // remove HTML
-            fieldText = fieldText.replaceAll( /\<\/?.*?\>/g, '' );
-        }
-
-        if( aField.fieldType === "ComponentInstance" ) {
-            fieldText = aField.inputParameters?.reduce( ( accumulator, currentValue ) => 
-                                            accumulator + getValue( currentValue.value ) + ", "
-                                            , "" );
-            fieldText = ( fieldText !== "" ? fieldText : aField.name ?? aField.extensionName );
-        }
-
-        if( ! fieldText ) {
-            fieldText = aField.outputParameters?.reduce( ( accumulator, currentValue ) => 
-                            accumulator + " / " + getValue( currentValue ) + " = " + currentValue.name
-                            , "" );
-            if( fieldText.length > 2 ) {
-                fieldText = fieldText.substring( 2 );
-            }
-        }
-        let fieldsNode = document.createTextNode( `${aField.fieldType}: ${fieldText}` );
-        appendNodeAndLine( fieldsNode );
-    } );
-    
-    // add fields if action
-    if( node.actionName ) {
-        let fieldsNode = document.createTextNode( node.actionName + " (" + node.actionType + ")" );
-        appendNodeAndLine( fieldsNode );
-        
-        node.inputParameters?.forEach( aField => {
-            let paramDescription = ( aField.field ?? aField.name ) + ' = ' + getValue( aField.value );
-            let paramNode = document.createTextNode( paramDescription );
-            appendNodeAndLine( paramNode );
-        } );
-    };
-
-    // describe collection processors
-    if( node.collectionProcessorType ) {
-        let type = ( node.collectionProcessorType == 'SortCollectionProcessor' ? 'Sort'
-            : node.collectionProcessorType == 'FilterCollectionProcessor' ? 'Filter'
-            : node.collectionProcessorType == 'RecommendationMapCollectionProcessor' ? 'Recommendation Map' 
-            : '' );
-        let typeNode = document.createTextNode( `Type:  ${type}` );
-        appendNodeAndLine( typeNode );
-        let sortOptions = node.sortOptions?.reduce( ( accumulator, currentValue ) => 
-                    accumulator + currentValue.sortField + " " + currentValue.sortOrder + ", "
-                    , "Sort Order:  " );
-        appendNodeAndLine( document.createTextNode( sortOptions ) );
-    }
-
-    // describe loops and collection processors
-    if( node.collectionReference ) {
-        let loopNode = document.createTextNode( `Loop collection:  ${node.collectionReference}` );
-        appendNodeAndLine( loopNode );
-    }
-    // add rules if decision
-    node.rules?.forEach( anItem => {
-        let ruleLabelNode = document.createTextNode( anItem.label );
-        appendNodeAndLine( ruleLabelNode );
-
-        anItem.conditions?.forEach( condition => {
-            let fieldsNode = document.createTextNode( condition.leftValueReference 
-                + " " + ( condition.operator == "EqualTo" ? "=" : condition.operator ) + " "
-                + getValue( condition.rightValue ) );
-        
-            appendNodeAndLine( fieldsNode );
-        } );
-    } );
-
-    // if record action
-    if( node.object ) {
-        let targetOfAction = document.createTextNode( 'Object:  ' + node.object );
-        appendNodeAndLine( targetOfAction );
-    }
-    if( node.assignNullValuesIfNoRecordsFound ) {
-        let assignNull = document.createTextNode( 'Assign null if no records:  ' + node.assignNullValuesIfNoRecordsFound );
-        appendNodeAndLine( assignNull );
-    }
-    if( node.getFirstRecordOnly ) {
-        let only1Record = document.createTextNode( 'Only first record:  ' + node.getFirstRecordOnly );
-        appendNodeAndLine( only1Record );
-    }
-    if( node.assignRecordIdToReference ) {
-        let assignId = document.createTextNode( 'Assign record id to:  ' + node.assignRecordIdToReference );
-        appendNodeAndLine( assignId );
-    }
-    if( node.inputReference ) {
-        let theInput = document.createTextNode( 'Input:  ' + node.inputReference );
-        appendNodeAndLine( theInput );
-    }
-    let recordOperationType = ( node.type == 'recordCreates' ? 'Creation' :
-                                node.type == 'recordUpdates' ? 'Update' :
-                                node.type == 'recordLookups' ? 'Lookup' : 
-                                node.type == 'recordDeletes' ? 'Delete' : 
-                                null );
-    if( recordOperationType ) {
-        let theAction = document.createTextNode( `Action:  Record ${recordOperationType}` );
-        appendNodeAndLine( theAction );
-    }
-
-    // add filters if lookup
-    if( node.filters && node.filters.length > 0 ) {
-        let filterHeader = document.createTextNode( `Filters: ` );
-        appendNodeAndLine( filterHeader );
-        node.filters?.forEach( anItem => {
-            let fieldsNode = document.createTextNode( anItem.field 
-                                            + " " + ( anItem.operator == "EqualTo" ? "=" : anItem.operator ) + " "
-                                            + getValue( anItem.value ) );
-            appendNodeAndLine( fieldsNode );
-        } );
-    }
-
-    // add fields if assignment
-    node.assignmentItems?.forEach( anItem => {
-        let fieldsNode = document.createTextNode( anItem.assignToReference 
-                                        + " " + ( anItem.operator == "Assign" ? "=" : "" )
-                                        + ( anItem.operator == "Add" ? "appended with" : "" ) + " "
-                                        + getValue( anItem.value ) );
-        appendNodeAndLine( fieldsNode );
-    } );
-
-    // // add parameters if subflow
-    // node.subflows?.forEach( anItem => { 
-    //     console.log( anItem );
-    // } );
-    
+    const renderer = typeRenderers[ node.type ] ?? ( n => appendLine( `(${n.type})` ) );
+    renderer( node );
 }
