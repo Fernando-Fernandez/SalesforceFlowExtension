@@ -29,12 +29,13 @@
       }
     ]
     , "web_accessible_resources": [ {
-      "matches": [ 
+      "matches": [
         "https://*.salesforce.com/*",
+        "https://*.salesforce-setup.com/*",
         "https://*.visual.force.com/*",
         "https://*.lightning.force.com/*",
         "https://*.cloudforce.com/*",
-        "https://*.visualforce.com/*" 
+        "https://*.visualforce.com/*"
       ],
       "resources": [ "scripts/*", "popup.html" ]
     } ]
@@ -49,6 +50,7 @@
   
     , "host_permissions": [
       "https://*.salesforce.com/*",
+      "https://*.salesforce-setup.com/*",
       "https://*.visual.force.com/*",
       "https://*.lightning.force.com/*",
       "https://*.cloudforce.com/*",

@@ -177,7 +177,8 @@ function addHoverEvents() {
 }
 
 function findNodeByNameInArray( elementName, array ) {
-    if( array && array.length < 0 ) {
+    // flows may have no elements of a given type, e.g. flowDefinition.loops undefined
+    if( ! array ) {
         return null;
     }
     return array.find( aNode => aNode.label === elementName );

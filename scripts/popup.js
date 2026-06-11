@@ -927,10 +927,9 @@ function sendToGPT( dataObject, openAIKey ) {
         let model = ( gptModel ? gptModel : CONFIG.GPT_PARAMS.default_model );
         let systemPrompt = CONFIG.PROMPTS.system;
 
-        // replace characters that would invalidate the JSON payload‘
-        let data = resultData.replaceAll( '\n', '\\n ' ).replaceAll( '"', '“' )
-                                .replaceAll( '\'', '‘' ).replaceAll( '\\', '\\\\' )
-                                .replaceAll( '\t', ' ' ).replaceAll( '   ', ' ' );
+        // normalize whitespace to save tokens; JSON.stringify below handles escaping,
+        // so quotes/backslashes/newlines in the flow data are passed through intact
+        let data = resultData.replaceAll( '\t', ' ' ).replaceAll( '   ', ' ' );
 
         // check size of data and select a bigger model as needed
         let originalModel = model;
@@ -981,13 +980,11 @@ function sendToGPT( dataObject, openAIKey ) {
         } else {
             // Standard chat completions for other models
             url = CONFIG.ENDPOINTS.standard;
-            let sysMessage = `{"role":"system","content":[{"type":"text","text":"${systemPrompt}"}]}`;
-            let userMessage = `{"role":"user","content":[{"type":"text","text":"${prompt} ${data}"}]}`;
             payloadParams = {
                 model: model,
                 messages: [
-                    JSON.parse(sysMessage), 
-                    JSON.parse(userMessage)
+                    { role: "system", content: [ { type: "text", text: systemPrompt } ] },
+                    { role: "user", content: [ { type: "text", text: `${prompt} ${data}` } ] }
                 ],
                 temperature: modelTemperature,
                 [tokenLimitParam]: max_tokens,

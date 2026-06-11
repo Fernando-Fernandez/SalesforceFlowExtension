@@ -107,8 +107,8 @@ describe('sendToGPT Function', () => {
       let model = (gptModel ? gptModel : 'gpt-5-nano');
       let systemPrompt = 'You are an expert at troubleshooting and explaining Salesforce flows.';
 
-      // Data sanitization (simplified for testing)
-      let data = resultData.replaceAll('\n', '\\n ').replaceAll('\t', ' ').replaceAll('   ', ' ');
+      // Normalize whitespace; JSON.stringify handles escaping of quotes/backslashes
+      let data = resultData.replaceAll('\t', ' ').replaceAll('   ', ' ');
 
       // Model upgrade logic
       let originalModel = model;
@@ -153,11 +153,12 @@ describe('sendToGPT Function', () => {
         };
       } else {
         url = "https://api.openai.com/v1/chat/completions";
-        let sysMessage = `{"role":"system","content":[{"type":"text","text":"${systemPrompt}"}]}`;
-        let userMessage = `{"role":"user","content":[{"type":"text","text":"${prompt} ${data}"}]}`;
         payloadParams = {
           model: model,
-          messages: [JSON.parse(sysMessage), JSON.parse(userMessage)],
+          messages: [
+            { role: "system", content: [{ type: "text", text: systemPrompt }] },
+            { role: "user", content: [{ type: "text", text: `${prompt} ${data}` }] }
+          ],
           temperature: modelTemperature,
           [tokenLimitParam]: max_tokens,
           top_p: top_p,
@@ -690,6 +691,26 @@ describe('sendToGPT Function', () => {
         // let's just verify the basic sanitization worked
         expect(userMessage.includes('data')).toBe(true);
       }
+    });
+
+    test('should preserve quotes and backslashes in flow data', () => {
+      // flow filters/formulas often contain quotes and backslashes; building the
+      // payload as plain objects + JSON.stringify must pass them through intact
+      const dataObject = {
+        currentURL: 'https://example.com',
+        resultData: 'Filter: Name = "Acme \'HQ\'" AND Path = C:\\temp',
+        prompt: 'Test prompt',
+        gptModel: 'gpt-4o'
+      };
+
+      sendToGPT(dataObject, 'test-key');
+
+      expect(mockFetch).toHaveBeenCalled();
+      const sentPayload = JSON.parse(mockFetch.mock.calls[0][1].body);
+      const userMessage = sentPayload.messages[1].content[0].text;
+
+      expect(userMessage).toContain('Name = "Acme \'HQ\'"');
+      expect(userMessage).toContain('Path = C:\\temp');
     });
   });
 });
