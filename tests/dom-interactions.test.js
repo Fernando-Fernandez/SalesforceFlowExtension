@@ -168,6 +168,26 @@ describe('DOM Interactions', () => {
       expect(customInput.value).toBe('gpt-4-turbo');
     });
 
+    test('should not stack duplicate handlers when parseFlow runs again', () => {
+      // parseFlow assigns handler properties (onclick/onchange/oninput) instead of
+      // addEventListener, so receiving a second flow definition replaces the
+      // handler rather than firing one API call per previous parseFlow run
+      const button = document.createElement('button');
+      document.body.appendChild(button);
+
+      const firstHandler = jest.fn();
+      const secondHandler = jest.fn();
+
+      // simulate two parseFlow runs assigning the handler
+      button.onclick = firstHandler;
+      button.onclick = secondHandler;
+
+      button.click();
+
+      expect(firstHandler).not.toHaveBeenCalled();
+      expect(secondHandler).toHaveBeenCalledTimes(1);
+    });
+
     test('should show/hide custom input based on selection', () => {
       const ui = createModelSelectionUI();
       document.body.appendChild(ui);

@@ -634,8 +634,10 @@ function parseFlow( flowDefinition ) {
         }
     });
     
-    // Add event listeners to save model preference and handle custom input
-    gptSelection.addEventListener('change', (e) => {
+    // Add event handlers to save model preference and handle custom input
+    // (assigned as properties, not addEventListener, so that re-running parseFlow
+    // replaces the handlers instead of stacking duplicates)
+    gptSelection.onchange = (e) => {
         if (e.target.name === 'gpt-version') {
             const customModelInput = gptSelection.querySelector('.custom-model-input');
             const customModelName = gptSelection.querySelector('#custom-model-name');
@@ -648,10 +650,10 @@ function parseFlow( flowDefinition ) {
                 localStorage.setItem('selectedGPTModel', e.target.value);
             }
         }
-    });
-    
+    };
+
     // Handle custom model name input
-    gptSelection.addEventListener('input', (e) => {
+    gptSelection.oninput = (e) => {
         if (e.target.id === 'custom-model-name') {
             const customRadios = gptSelection.querySelectorAll('input[value="custom"]');
             const customRadio = customRadios[0];
@@ -659,12 +661,13 @@ function parseFlow( flowDefinition ) {
                 localStorage.setItem('selectedGPTModel', e.target.value.trim());
             }
         }
-    });
+    };
 
     // Model selection is already in the HTML, no need to append
-    
-    // make button call GPT 
-    gptButton.addEventListener( 'click', () => {
+
+    // make button call GPT
+    // (handler property so the latest flow's data replaces any previous handler)
+    gptButton.onclick = () => {
 
         const spinner = document.getElementById( "spinner" );
         spinner.style.display = "inline-block";
@@ -709,7 +712,7 @@ function parseFlow( flowDefinition ) {
             gptModel: gptModel
         };
         sendToGPT( dataObject, openAIKey );
-    } );
+    };
 }
 
 // function getCSVFromMarkDown( stepByStepMDTable ) {
@@ -757,9 +760,10 @@ function createTableFromMarkDown( flowName, actionMap, stepByStepMDTable ) {
     flowTableContainer.innerHTML = table;
 
     // use existing download button
+    // (handler property so re-parsing replaces the handler instead of stacking duplicates)
     let downloadButton = document.getElementById( 'downloadButton' );
     downloadButton.style.display = 'block';
-    downloadButton.addEventListener( 'click', () => {
+    downloadButton.onclick = () => {
         // create blob with markdown for download
         let markDownDescription = new Blob( [stepByStepMDTable], { type: 'text/markdown' } );
         const url = URL.createObjectURL( markDownDescription );
@@ -778,7 +782,7 @@ function createTableFromMarkDown( flowName, actionMap, stepByStepMDTable ) {
 
         // release memory from file
         URL.revokeObjectURL( url );
-    } );
+    };
 
     // table and button are already in the document, no need to append
 }
@@ -886,7 +890,8 @@ function sendToGPT( dataObject, openAIKey ) {
         } );
 
         // attempt to retrieve previously stored response
-        const cacheKey = verySimpleHash( currentURL + prompt + resultData.substring( 0, CONFIG.DATA_LIMITS.cache_key_substring_length ) ); // JSON.stringify( { currentURL, resultData, prompt } );
+        // (same key is used to store the response after the fetch below)
+        const cacheKey = verySimpleHash( currentURL + prompt + resultData.substring( 0, CONFIG.DATA_LIMITS.cache_key_substring_length ) );
         const cachedResponse = sessionStorage.getItem( cacheKey );
         if( cachedResponse != null && cachedResponse != undefined ) {
             let parsedCachedResponse = JSON.parse( cachedResponse );
@@ -1038,9 +1043,8 @@ function sendToGPT( dataObject, openAIKey ) {
                 }
             }
 
-            // store response in local cache
-            const cacheKey = JSON.stringify( { currentURL, resultData, prompt } );
-            sessionStorage.setItem( cacheKey, JSON.stringify( { 
+            // store response in local cache under the same key used for the lookup above
+            sessionStorage.setItem( cacheKey, JSON.stringify( {
                                             cachedDate: Date.now() 
                                             , parsedResponse } ) 
                                     );

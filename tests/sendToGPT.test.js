@@ -203,8 +203,7 @@ describe('sendToGPT Function', () => {
           }
         }
 
-        // Cache response
-        const cacheKey = JSON.stringify({ currentURL, resultData, prompt });
+        // Cache response under the same key used for the lookup above
         sessionStorage.setItem(cacheKey, JSON.stringify({
           cachedDate: Date.now(),
           parsedResponse
@@ -312,6 +311,30 @@ describe('sendToGPT Function', () => {
 
       expect(mockResponseSpan.innerText).toBe('Using gpt-4o...');
       expect(mockFetch).toHaveBeenCalled();
+    });
+
+    test('should store response under the same key used for lookup', async () => {
+      const dataObject = {
+        currentURL: 'https://example.com',
+        resultData: 'Test flow data',
+        prompt: 'Explain this flow',
+        gptModel: 'gpt-4o'
+      };
+
+      // first call fetches from the API and stores the response
+      sendToGPT(dataObject, 'test-key');
+      await new Promise(resolve => setTimeout(resolve, 0));
+
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+      const cacheKey = verySimpleHash('https://example.comExplain this flowTest flow data');
+      expect(sessionStorage.getItem(cacheKey)).not.toBeNull();
+
+      // second call must hit the cache instead of fetching again
+      sendToGPT(dataObject, 'test-key');
+      await new Promise(resolve => setTimeout(resolve, 0));
+
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+      expect(mockResponseSpan.innerText).toBe('OpenAI (cached response): Test response');
     });
 
     test('should clean up expired cache entries', () => {
