@@ -6,7 +6,8 @@
 
 const GETHOSTANDSESSION = "getHostSession";
 const POPUP_READY_MESSAGE = "sfFlowExtensionPopupReady";
-const TOOLING_API_VERSION = 'v57.0';
+// fallback when the org's latest API version cannot be fetched
+const DEFAULT_API_VERSION = 'v57.0';
 const BUTTON_STYLE = "background-color: blueviolet!important; color: white!important; \
 margin-right: 30px; ";
 
@@ -25,12 +26,27 @@ if( sfElement ) {
         sessionId = resultData.session;
 
         // now that host and session are available, get flow definition
-        let response = setFlowDefinitionFromToolingAPI( sfHost, sessionId );
+        setFlowDefinitionFromToolingAPI( sfHost, sessionId );
     } );
 
 }
 
-function setFlowDefinitionFromToolingAPI( baseUrl, sessionId ) {
+async function getLatestAPIVersion( baseUrl ) {
+    // /services/data/ lists the API versions the org supports (no auth needed),
+    // sorted ascending, e.g. [ ..., { "version": "63.0", ... } ]
+    try {
+        let response = await fetch( "https://" + baseUrl + "/services/data/" );
+        let versions = await response.json();
+        if( Array.isArray( versions ) && versions.length > 0 ) {
+            return "v" + versions[ versions.length - 1 ].version;
+        }
+    } catch( e ) {
+        // unreachable or unexpected response, use the pinned fallback below
+    }
+    return DEFAULT_API_VERSION;
+}
+
+async function setFlowDefinitionFromToolingAPI( baseUrl, sessionId ) {
     let params = location.search; // ?flowId=3013m000000XIygAAG
     let flowIdArray = params.match( /(?:flowId\=)(.*?)(?=&|$)/ );
     if( ! flowIdArray ) {
@@ -38,8 +54,10 @@ function setFlowDefinitionFromToolingAPI( baseUrl, sessionId ) {
     }
     let flowId = flowIdArray[ 1 ];
 
-    // Tooling API endpoint:  /services/data/v35.0/tooling/sobjects/Flow/301...AAG
-    let endpoint = "https://" + baseUrl +  "/services/data/" + TOOLING_API_VERSION + "/tooling/sobjects/Flow/" + flowId;
+    let apiVersion = await getLatestAPIVersion( baseUrl );
+
+    // Tooling API endpoint:  /services/data/v63.0/tooling/sobjects/Flow/301...AAG
+    let endpoint = "https://" + baseUrl +  "/services/data/" + apiVersion + "/tooling/sobjects/Flow/" + flowId;
     let request = {
         method: "GET"
         , headers: {
@@ -47,12 +65,10 @@ function setFlowDefinitionFromToolingAPI( baseUrl, sessionId ) {
           , "Authorization": "Bearer " + sessionId
         }
     };
-    let response = fetch( endpoint, request )
-                    .then( ( response ) => response.json() )
-                    .then( ( data ) => {
-                        flowDefinition = data.Metadata;
-                        waitForFlowUI();
-                    } );
+    let response = await fetch( endpoint, request );
+    let data = await response.json();
+    flowDefinition = data.Metadata;
+    waitForFlowUI();
 }
 
 let getNodesTimeout;
@@ -182,14 +198,17 @@ function addHoverEvents() {
 
         // copy title from original node into data structure
         flowShape.dataset.flowElementName = flowElementName;
-        flowShape.addEventListener( "mouseover", ( event ) => {
-            displayTooltip( event, true );
-        } );
 
-        flowShape.addEventListener( "mouseout", ( event ) => {
-            // remove tooltip
+        // handler properties instead of addEventListener so repeated
+        // waitForFlowUI/addHoverEvents passes replace instead of stacking
+        flowShape.onmouseover = ( event ) => {
+            displayTooltip( event, true );
+        };
+
+        flowShape.onmouseout = ( event ) => {
+            // remove tooltip (after a short delay)
             displayTooltip( event, false );
-        } );
+        };
     }
 }
 
@@ -434,23 +453,43 @@ background-color: darkgray; z-index: 998; position: relative; \
 clip-path: polygon(0% 50%, 15px 0%, 15px 47%, 100% 47%, 100% 53%, 15px 53%, 15px 100% ); \
 top: " + ( topPos - arrowYDistance ) + "px; left: " + ( leftPos - distanceX ) + "px;" );
     currentTarget.parentNode.appendChild( arrow );
+
+    // keep the tooltip open while the mouse is over it (long tooltips
+    // would otherwise vanish before they can be read)
+    tooltip.onmouseover = () => clearTimeout( hideTooltipTimer );
+    tooltip.onmouseout = scheduleTooltipRemoval;
 }
 
-let tooltip, arrow;
+let tooltip, arrow, hideTooltipTimer;
+const TOOLTIP_HIDE_DELAY_MS = 300;
+
+function removeTooltip() {
+    tooltip?.remove();
+    arrow?.remove();
+    tooltip = null;
+    arrow = null;
+}
+
+function scheduleTooltipRemoval() {
+    clearTimeout( hideTooltipTimer );
+    hideTooltipTimer = setTimeout( removeTooltip, TOOLTIP_HIDE_DELAY_MS );
+}
+
 function displayTooltip( event, displayFlag ) {
     if( ! flowDefinition ) {
         return;
     }
-    // remove old tooltip
-    if( tooltip ) {
-        tooltip.remove();
-        arrow.remove();
-    }
 
-    // if flag = false, keep it without tooltip
+    // if flag = false, remove the tooltip after a short delay so it
+    // survives brief mouse-outs and can be hovered to keep it open
     if( ! displayFlag ) {
+        scheduleTooltipRemoval();
         return;
     }
+
+    // remove old tooltip right away before showing the new one
+    clearTimeout( hideTooltipTimer );
+    removeTooltip();
 
     // determine layout of canvas
     const layout = flowDefinition.processMetadataValues[ 1 ].value.stringValue;

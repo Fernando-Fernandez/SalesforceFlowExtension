@@ -1,7 +1,11 @@
 // Configuration Constants
 const CONFIG = {
     // Storage and caching
-    STORAGE_KEY: 'hashedKey',
+    // the OpenAI key is stored locally and unencrypted (an extension has no way
+    // to keep a real secret client-side); the name says exactly that
+    STORAGE_KEY: 'openAIKey',
+    // older versions kept the key in localStorage as TextEncoder bytes
+    LEGACY_STORAGE_KEY: 'hashedKey',
     CACHE_DURATION: 300000, // 5 minutes in milliseconds
     
     // GPT API Configuration
@@ -326,62 +330,55 @@ class FlowParser {
         return parameters;
     }
 
-    getMDTableRows( actionMap ) {
-        let stepByStepMDTable = '';
+    // builds the table as structured rows of [ name, type, parameters, condition,
+    // next element ]; continuation rows of the same element have the first three
+    // cells empty; consumed by the DOM table builder and the markdown generator
+    getTableRows( actionMap ) {
+        let rows = [];
+        const continuationCells = [ '', '', '' ];
+
         for( const [ identifier, action ] of actionMap ) {
             let elementType = action.type;
             let faultElement = action.faultElement;
-            let parameters = action.parameters;
 
-            let nextElement = action.connector?.targetReference;
-            if( nextElement == undefined ) {
-                nextElement = action.defaultConnector?.targetReference;
-            }
-            if( nextElement == undefined ) {
-                nextElement = '';
-            }
+            let nextElement = action.connector?.targetReference
+                            ?? action.defaultConnector?.targetReference
+                            ?? '';
 
-            let prefix = `|${action.fullDescription}|${elementType}|${ parameters }|`;
+            let firstCells = [ action.fullDescription, elementType, action.parameters ];
 
             // handle elements with multiple rows
             if( elementType == CONFIG.FLOW.element_types.start ) {
-                stepByStepMDTable += `${prefix}Runs immediately|${ nextElement }|\n`;
-                prefix = '||||';
-                if( action.scheduledPaths ) {
-                    action.scheduledPaths.forEach( s => {
-                        let nextElement = s.connector?.targetReference;
-
-                        let condition = `${s.label} / ${s.offsetNumber} ${s.offsetUnit} `
-                                    + `${( s.timeSource == 'RecordField' ? s.recordField : 'RecordTriggerEvent' )}`;
-                        stepByStepMDTable += `${prefix}${condition}|${nextElement}|\n`;
-                    } );
-                }
+                rows.push( [ ...firstCells, 'Runs immediately', nextElement ] );
+                action.scheduledPaths?.forEach( s => {
+                    let condition = `${s.label} / ${s.offsetNumber} ${s.offsetUnit} `
+                                + `${( s.timeSource == 'RecordField' ? s.recordField : 'RecordTriggerEvent' )}`;
+                    rows.push( [ ...continuationCells, condition, s.connector?.targetReference ?? '' ] );
+                } );
                 continue;
             }
 
             if( elementType == 'decision' ) {
-                nextElement = action.defaultConnector?.targetReference;
-                stepByStepMDTable += `${prefix}${action.defaultCondition}|${ nextElement }|\n`;
-                prefix = '||||';
+                rows.push( [ ...firstCells, action.defaultCondition
+                            , action.defaultConnector?.targetReference ?? '' ] );
+                firstCells = continuationCells;
             }
 
             if( elementType == 'loop' ) {
-                stepByStepMDTable += `${prefix}Next value|${ action.nextValueConnector?.targetReference }|\n`;
-                prefix = '||||';
-                stepByStepMDTable += `${prefix}No more values|${ action.noMoreValuesConnector?.targetReference }|\n`;
-
+                rows.push( [ ...firstCells, 'Next value'
+                            , action.nextValueConnector?.targetReference ?? '' ] );
+                rows.push( [ ...continuationCells, 'No more values'
+                            , action.noMoreValuesConnector?.targetReference ?? '' ] );
                 continue;
             }
 
             if( elementType == 'wait' ) {
-                let elementCondition = '';
                 action.waitEvents?.forEach( w => {
-                    elementCondition += `${w.label}`;
-                    elementCondition += ` \ Type: ${w.eventType}`;
-                    elementCondition += this.getFieldOperations( w.conditions );
-                    nextElement = w.connector?.targetReference;
-                    stepByStepMDTable += `${prefix}${elementCondition}|${ nextElement }|\n`;
-                    prefix = '||||';
+                    let elementCondition = `${w.label}`
+                                        + ` \ Type: ${w.eventType}`
+                                        + this.getFieldOperations( w.conditions );
+                    rows.push( [ ...firstCells, elementCondition, w.connector?.targetReference ?? '' ] );
+                    firstCells = continuationCells;
                 } );
                 continue;
             }
@@ -392,29 +389,31 @@ class FlowParser {
                     nextElement += ' ' + this.parenthesis( action.defaultConnectorLabel );
                 }
                 // if no conditions, just add the default condition
-                stepByStepMDTable += `${prefix}${action.defaultCondition}|${ nextElement }|\n`;
+                rows.push( [ ...firstCells, action.defaultCondition, nextElement ] );
 
                 if( faultElement ) {
-                    prefix = '||||';
-                    stepByStepMDTable += `${prefix}fault|${ faultElement }|\n`;
+                    rows.push( [ ...continuationCells, 'fault', faultElement ] );
                 }
 
             } else {
                 // add row for each rule/branch
-                for( let r = 0; r < action.rules.length; r++ ) {
-                    let rule = action.rules[ r ];
-                    let elementCondition = rule.name + this.parenthesis( rule.label );
-                    let conditionNextElement = rule.connector?.targetReference;
+                for( const rule of action.rules ) {
                     // add expression for each condition within the rule
-                    elementCondition += this.getFieldOperations( rule.conditions );
-
-                    stepByStepMDTable += `${prefix}${ elementCondition }|${ conditionNextElement }|\n`;
-                    prefix = '||||';
+                    let elementCondition = rule.name + this.parenthesis( rule.label )
+                                        + this.getFieldOperations( rule.conditions );
+                    rows.push( [ ...firstCells, elementCondition, rule.connector?.targetReference ?? '' ] );
+                    firstCells = continuationCells;
                 }
             }
         }
 
-        return stepByStepMDTable;
+        return rows;
+    }
+
+    getMDTableRows( tableRows ) {
+        return tableRows
+                    .map( cells => `|${ cells.join( '|' ) }|\n` )
+                    .join( '' );
     }
 
     assignIndexToElements( actionMap, currentElement, parentBranch, conditionLabel ) {
@@ -464,7 +463,7 @@ class FlowParser {
         }
     }
 
-    parse( flowDefinition ) {
+    async parse( flowDefinition ) {
         // console.log( flowDefinition );
 
         let flowName = 'Flow:  ' + flowDefinition.label;
@@ -643,13 +642,17 @@ class FlowParser {
         explanationHTML.innerHTML = '<b>This flow:  </b>' + explanation.replaceAll( /\n/g, '<br />' );
         dom.defaultExplainer.appendChild( explanationHTML );
 
-        // generate itemized description of the flow
+        // generate itemized description of the flow:  markdown for download/GPT,
+        // and the same rows rendered as a DOM table
+        let tableRows = this.getTableRows( actionMap );
         let stepByStepMDTable = `${flowName}\nDescription: ${flowDescription}\nType: ${flowDefinition.processType}\n\n`
                             + '|Element name|Type|Parameters|Condition|Condition next element|\n'
-                            + '|-|-|-|-|-|\n';
-        stepByStepMDTable += this.getMDTableRows( actionMap );
+                            + '|-|-|-|-|-|\n'
+                            + this.getMDTableRows( tableRows );
 
-        createTableFromMarkDown( flowName, actionMap, stepByStepMDTable );
+        createFlowTable( { flowName, flowDescription
+                        , processType: flowDefinition.processType
+                        , tableRows, actionMap, stepByStepMDTable } );
 
         // let csvFlow = getCSVFromMarkDown( stepByStepMDTable );
         // console.log( csvFlow );
@@ -657,7 +660,7 @@ class FlowParser {
         // prepare to call OpenAI
         dom.response.innerText = '';
 
-        let storedKey = localStorage.getItem( CONFIG.STORAGE_KEY );
+        let storedKey = await getStoredKey();
         if( ! storedKey ) {
             dom.spinner.style.display = "none";
             dom.response.innerText = '';
@@ -727,14 +730,7 @@ class FlowParser {
 
             dom.spinner.style.display = "inline-block";
 
-            // extract OpenAI key
-            let encodedKey = JSON.parse( storedKey );
-            let keyArray = [];
-            Object.keys( encodedKey ).forEach( idx => keyArray.push( encodedKey[ idx ] ) );
-            let intArray = new Uint8Array( keyArray );
-            let dec = new TextDecoder();
-            let openAIKey = dec.decode( intArray );
-
+            let openAIKey = storedKey;
             if( ! openAIKey ) {
                 return;
             }
@@ -799,38 +795,88 @@ if( window.parent !== window ) {
 //     return table;
 // }
 
-function createTableFromMarkDown( flowName, actionMap, stepByStepMDTable ) {
-    let addAnchorFunction = function ( entireMatch, capturedStr ) {
-        let spaceIndex = capturedStr.indexOf(' ');
-        let name = ( spaceIndex > 0 ? capturedStr.substring( 0, spaceIndex ) : capturedStr );
-        let smallText = ( spaceIndex > 0 ? capturedStr.substring( spaceIndex ) : '' );
-        return `<tr><td><a id="${name}" >${name}<br /><span class="smallText">${smallText}</span></a></td>`;
-    }
-    let addLinkFunction = function ( entireMatch, capturedStr ) {
-        let nextAction = actionMap.get( capturedStr );
-        if( nextAction == undefined ) {
-            return `||\n`;
-        }
-        return `|<a href="#${capturedStr}" >${capturedStr}</a>|\n`;
-    }
+const TABLE_HEADERS = [ 'Element name', 'Type', 'Parameters', 'Condition', 'Condition next element' ];
 
+// appends text to a cell, rendering the " / " separators as line breaks;
+// text nodes only, so flow labels/formulas cannot inject HTML
+function appendMultilineText( container, text ) {
+    String( text ).split( ' / ' ).forEach( ( line, index ) => {
+        if( index > 0 ) {
+            container.appendChild( document.createElement( 'br' ) );
+        }
+        container.appendChild( document.createTextNode( line ) );
+    } );
+}
+
+// builds the flow table with DOM APIs from the structured rows;
+// the markdown version is kept only for the download button and GPT
+function createFlowTable( { flowName, flowDescription, processType, tableRows, actionMap, stepByStepMDTable } ) {
     dom.flowTableContainer.style.display = 'block';
     dom.flowTableContainer.innerHTML = '';
 
-    let table = '<br /><table id="flowTable"><thead>' + stepByStepMDTable
-                .replaceAll( "|\n|-|-|-|-|-|\n|", "</td></tr></head><tbody><tr><td>" )
-                .replaceAll( /(?:\|)([^|]+?)(?:\|\n)/gi, addLinkFunction )
-                .replaceAll( "|\n", "</td></tr>" )
-                .replaceAll( "</td></tr>|", "</td></tr>\n<tr><td>" )
-                .replaceAll( "\n|", "<tr><td>" )
-                .replaceAll( "|", "</td><td>" )
-                .replaceAll( /(?:<tr><td>)(.+?)(?:<\/td>)/gi, addAnchorFunction )
-                .replaceAll( " / ", "<br />" )
-                .replaceAll( "<td> <br /> ", "<td>" )
-                .replaceAll( 'Flow:', '<span style="font-weight: bold;">Flow:</span>' )
-                .replaceAll( '\nDescription:', '\n<br /><span style="font-weight: bold;">Description:</span>' )
-                    + '</tbody></table><br />';
-    dom.flowTableContainer.innerHTML = table;
+    // heading with flow name, description and type
+    let heading = document.createElement( 'div' );
+    [ [ 'Flow:', flowName.replace( 'Flow:  ', '' ) ]
+    , [ 'Description:', flowDescription ]
+    , [ 'Type:', processType ] ].forEach( ( [ label, value ] ) => {
+        let bold = document.createElement( 'span' );
+        bold.style.fontWeight = 'bold';
+        bold.innerText = label;
+        heading.appendChild( bold );
+        heading.appendChild( document.createTextNode( ' ' + ( value ?? '' ) ) );
+        heading.appendChild( document.createElement( 'br' ) );
+    } );
+    dom.flowTableContainer.appendChild( heading );
+
+    let table = document.createElement( 'table' );
+    table.id = 'flowTable';
+
+    // header row uses td cells to match the existing #flowTable TD styling
+    let headerRow = table.createTHead().insertRow();
+    TABLE_HEADERS.forEach( aHeader => {
+        headerRow.insertCell().innerText = aHeader;
+    } );
+
+    let tbody = table.createTBody();
+    tableRows.forEach( ( [ name, type, parameters, condition, nextName ] ) => {
+        let row = tbody.insertRow();
+
+        // first cell anchors the element so other rows can link to it
+        let nameCell = row.insertCell();
+        if( name ) {
+            let spaceIndex = name.indexOf( ' ' );
+            let anchorName = ( spaceIndex > 0 ? name.substring( 0, spaceIndex ) : name );
+            let smallText = ( spaceIndex > 0 ? name.substring( spaceIndex ) : '' );
+            let anchor = document.createElement( 'a' );
+            anchor.id = anchorName;
+            anchor.appendChild( document.createTextNode( anchorName ) );
+            if( smallText ) {
+                anchor.appendChild( document.createElement( 'br' ) );
+                let small = document.createElement( 'span' );
+                small.className = 'smallText';
+                appendMultilineText( small, smallText );
+                anchor.appendChild( small );
+            }
+            nameCell.appendChild( anchor );
+        }
+
+        appendMultilineText( row.insertCell(), type );
+        appendMultilineText( row.insertCell(), parameters );
+        appendMultilineText( row.insertCell(), condition );
+
+        // last cell links to the target element's row when it exists
+        let nextCell = row.insertCell();
+        if( nextName && actionMap.has( nextName ) ) {
+            let link = document.createElement( 'a' );
+            link.href = '#' + nextName;
+            link.innerText = nextName;
+            nextCell.appendChild( link );
+        } else if( nextName ) {
+            appendMultilineText( nextCell, nextName );
+        }
+    } );
+
+    dom.flowTableContainer.appendChild( table );
 
     // use existing download button
     // (handler property so re-parsing replaces the handler instead of stacking duplicates)
@@ -860,14 +906,32 @@ function createTableFromMarkDown( flowName, actionMap, stepByStepMDTable ) {
     // table and button are already in the document, no need to append
 }
 
-function setKey() {
+async function setKey() {
     dom.error.innerText = "";
 
-    let enc = new TextEncoder();
-    let encrypted = enc.encode( dom.openAIKeyInput.value );
+    await chrome.storage.local.set( { [ CONFIG.STORAGE_KEY ]: dom.openAIKeyInput.value } );
+    dom.error.innerText = "Key saved locally (unencrypted, in this browser profile only). "
+                        + "An AI explanation should appear here the next time you open this page.";
+}
 
-    localStorage.setItem( CONFIG.STORAGE_KEY, JSON.stringify( encrypted ) );
-    dom.error.innerText = "An AI explanation should appear here the next time you open this page.";
+async function getStoredKey() {
+    let stored = await chrome.storage.local.get( CONFIG.STORAGE_KEY );
+    let key = stored[ CONFIG.STORAGE_KEY ];
+    if( key ) {
+        return key;
+    }
+
+    // migrate a key saved by older versions in localStorage as encoded bytes
+    let legacyKey = localStorage.getItem( CONFIG.LEGACY_STORAGE_KEY );
+    if( ! legacyKey ) {
+        return null;
+    }
+    let encodedKey = JSON.parse( legacyKey );
+    let intArray = new Uint8Array( Object.values( encodedKey ) );
+    key = new TextDecoder().decode( intArray );
+    await chrome.storage.local.set( { [ CONFIG.STORAGE_KEY ]: key } );
+    localStorage.removeItem( CONFIG.LEGACY_STORAGE_KEY );
+    return key;
 }
 
 function verySimpleHash( data ) {

@@ -72,6 +72,33 @@ describe('Model Detection and API Logic', () => {
     });
   });
 
+  describe('Salesforce API Version Selection', () => {
+    // mirrors getLatestAPIVersion in content.js: pick the last (highest)
+    // version from /services/data/, fall back to the pinned default
+    const DEFAULT_API_VERSION = 'v57.0';
+    function pickLatestVersion(versions) {
+      if (Array.isArray(versions) && versions.length > 0) {
+        return 'v' + versions[versions.length - 1].version;
+      }
+      return DEFAULT_API_VERSION;
+    }
+
+    test('should pick the last version from /services/data/', () => {
+      const versions = [
+        { version: '61.0', label: 'Summer \'24' },
+        { version: '62.0', label: 'Winter \'25' },
+        { version: '63.0', label: 'Spring \'25' }
+      ];
+      expect(pickLatestVersion(versions)).toBe('v63.0');
+    });
+
+    test('should fall back to the default when response is empty or invalid', () => {
+      expect(pickLatestVersion([])).toBe(DEFAULT_API_VERSION);
+      expect(pickLatestVersion(null)).toBe(DEFAULT_API_VERSION);
+      expect(pickLatestVersion({ error: 'unexpected' })).toBe(DEFAULT_API_VERSION);
+    });
+  });
+
   describe('API Parameters', () => {
     test('should use correct token parameter for GPT-5', () => {
       expect(getTokenLimitParam('gpt-5-nano')).toBe('max_output_tokens');
