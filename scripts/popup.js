@@ -100,21 +100,9 @@ const dom = {
 };
 
 class FlowParser {
-    constructor() {
-        this.index = CONFIG.HASH.initial_value;
-        this.forksArray = [];
-    }
-
     parseValue( rightValue ) {
-        let theValue = rightValue?.apexValue ??
-                        rightValue?.booleanValue ??
-                        rightValue?.dateTimeValue ??
-                        rightValue?.dateValue ??
-                        rightValue?.elementReference ??
-                        rightValue?.numberValue ??
-                        rightValue?.sobjectValue ??
-                        rightValue?.stringValue ?? 'null';
-        return theValue;
+        // shared extraction; the table prints 'null' for missing values
+        return FlowParserShared.getValue( rightValue, 'null' );
     }
 
     convertOperator( operator ) {
@@ -416,53 +404,6 @@ class FlowParser {
                     .join( '' );
     }
 
-    assignIndexToElements( actionMap, currentElement, parentBranch, conditionLabel ) {
-        // assign order number to current element
-        this.index++;
-        currentElement.index = this.index;
-        // console.log( this.index, currentElement.name );
-
-        // link element to parent branch it inherited
-        // so all elements will belong to a parent branch
-        let currentParentBranch = parentBranch;
-        let currentConditionLabel = conditionLabel;
-        currentElement.parentBranch = currentParentBranch;
-        currentElement.conditionLabel = currentConditionLabel;
-
-        // check all branches flowing from the current element
-        let nbrBranches = currentElement.branchArray.length;
-        if( nbrBranches > 1 ) {
-            // store current element if 2+ branches flow out of it
-            this.forksArray.push( currentElement );
-
-            // if current element is a branch, it will be
-            // the parent branch of the next elements
-            currentParentBranch = currentElement;
-        }
-        for( let i = 0; i < nbrBranches; i++ ) {
-            if( nbrBranches > 1 ) {
-                currentConditionLabel = currentElement.branchLabelArray[ i ];
-            }
-
-            // check next element in each branch
-            let aBranch = currentElement.branchArray[ i ];
-            if( aBranch == null || aBranch == undefined ) {
-                continue;
-            }
-
-            // if element has index, then it has already been visited so skip it
-            let branchNextElement = actionMap.get( aBranch );
-            if( branchNextElement.index ) {
-                continue;
-            }
-
-            // continue in this branch, assigning index to elements,
-            // recursively until all elements have indexes
-            this.assignIndexToElements( actionMap, branchNextElement
-                                , currentParentBranch, currentConditionLabel );
-        }
-    }
-
     async parse( flowDefinition ) {
         // console.log( flowDefinition );
 
@@ -496,30 +437,7 @@ class FlowParser {
         actionMap.set( firstElement.name, firstElement );
 
         // collect nodes in the flow metadata and index them in a map
-        const definitionMap = new Map( [
-            [ 'recordLookups', flowDefinition.recordLookups ]
-            , [ 'recordCreates', flowDefinition.recordCreates ]
-            , [ 'recordUpdates', flowDefinition.recordUpdates ]
-            , [ 'recordDeletes', flowDefinition.recordDeletes ]
-            , [ 'recordRollbacks', flowDefinition.recordRollbacks ]
-            , [ 'assignments', flowDefinition.assignments ]
-            , [ 'decisions', flowDefinition.decisions ]
-            , [ 'screens', flowDefinition.screens ]
-            , [ 'loops', flowDefinition.loops ]
-            , [ 'steps', flowDefinition.steps ]
-            , [ 'subflows', flowDefinition.subflows ]
-            , [ 'actionCalls', flowDefinition.actionCalls ]
-            , [ 'apexPluginCalls', flowDefinition.apexPluginCalls ]
-            , [ 'collectionProcessors', flowDefinition.collectionProcessors ]
-            , [ 'transforms', flowDefinition.transforms ]
-            , [ 'waits', flowDefinition.waits ]
-            , [ 'dynamicChoiceSets', flowDefinition.dynamicChoiceSets ]
-            , [ 'variables', flowDefinition.variables ]
-            , [ 'textTemplates', flowDefinition.textTemplates ]
-            , [ 'formulas', flowDefinition.formulas ]
-            , [ 'constants', flowDefinition.constants ]
-            , [ 'choices', flowDefinition.choices ]
-        ] );
+        const definitionMap = FlowParserShared.buildDefinitionMap( flowDefinition );
 
         // reorganize flow elements into a single map indexed by name
         for( const [ typeName, array ] of definitionMap ) {
@@ -586,9 +504,7 @@ class FlowParser {
         }
 
         // assign sequential index to elements, following all their branches recursively
-        this.index = 0;
-        let currentElement = actionMap.get( firstElement.name );
-        this.assignIndexToElements( actionMap, currentElement, currentElement, 'start' );
+        FlowParserShared.indexElements( actionMap, firstElement.name );
 
         // sort elements by index so that table will be ordered by execution
         actionMap = new Map( [ ...actionMap.entries() ].sort( ( a, b ) => a[ 1 ].index - b[ 1 ].index ) );

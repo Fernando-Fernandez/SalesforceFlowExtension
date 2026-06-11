@@ -29,6 +29,9 @@ const SELECTORS = {
     , flowContainer: "div.slds-col.slds-grow.slds-grid.slds-is-relative.slds-scrollable_none"
 };
 
+// shared parsing helpers from flowParser.js, which the manifest loads first
+const { getValue, removeHTML, buildDefinitionMap, findElementByLabel, describeFlow } = FlowParserShared;
+
 let sfHost, sessionId, flowDefinition;
 
 // only execute event setup if within a Salesforce page
@@ -232,213 +235,9 @@ function addHoverEvents( flowShapes ) {
     }
 }
 
-function findNodeByNameInArray( elementName, array ) {
-    // flows may have no elements of a given type, e.g. flowDefinition.loops undefined
-    if( ! array ) {
-        return null;
-    }
-    return array.find( aNode => aNode.label === elementName );
-}
-
 function appendNodeAndLine( aNode ) {
     tooltip.appendChild( aNode );
     tooltip.appendChild( document.createElement( "br" ) );
-}
-
-function getValue( aValue ) {
-    return aValue ? ( aValue.elementReference ?? aValue.stringValue ?? aValue.numberValue
-                ?? aValue.booleanValue?? aValue.dateTimeValue?? aValue.dateValue ) : null;
-}
-
-function indexElementsAndReturnDescription( definitionMap ) {
-
-    // populate node map indexed by name
-    const nodeMap = new Map();
-    const screenMap = new Map();
-    const decisionMap = new Map();
-    definitionMap.forEach( ( value, key ) => {
-        value.forEach( aNode => { 
-            // get the node that the current node is pointing to
-            let targetName = aNode.connector?.targetReference;
-
-            // handle next node pointers in decisions
-            // TODO:  implement for loops too
-            if( ! targetName && aNode.rules && aNode.rules.length > 0 ) {
-                // branch to the first rule
-                targetName = aNode.rules[ 0 ].connector?.targetReference;
-            }
-            if( ! targetName ) {
-                targetName = aNode.defaultConnector?.targetReference;
-            }
-            const faultTargetName = aNode.faultConnector?.targetReference;
-            const newNode = { 
-                ...aNode 
-                , type:  key
-                , targetName:  targetName
-                , faultTargetName:  faultTargetName
-                , visitCount: 0
-            };
-            nodeMap.set( aNode.name, newNode );
-
-            // create text for screen describing the inputs/outputs
-            if( key === 'screens' ) {
-                const inputFields = aNode.fields.filter( aField => aField.fieldType !== "DisplayText" )
-                                            .map( aField => aField.fieldText ?? 
-                                                                aField.name ?? aField.extensionName )
-                                            .join( ", " );
-                const displayFields = aNode.fields.filter( aField => ( aField.fieldType == "ComponentInstance" 
-                                                                        || aField.fieldType == "DisplayText" ) 
-                                                                    && aField.fieldText )
-                                            .map( aField => aField.fieldText ?? 
-                                                                aField.name ?? aField.extensionName )
-                                            .join( ", " );
-                const description = ( displayFields ? "displaying:  " + removeHTML( displayFields ) : "" )
-                                + ( inputFields && displayFields ? " and " : "" )
-                                + ( inputFields ? "prompting the user for these fields:  " + inputFields : "" );
-                screenMap.set( aNode.name, description );
-            }
-
-            if( key === 'decisions' ) {
-                // TODO:  describe individual branches
-                const description = "checking these conditions:  " 
-                                + aNode.label + ' - ' + aNode.rules.map( aRule => aRule.label ).join( ", " );
-                decisionMap.set( aNode.name, description );
-            }
-        } );
-    } );
-    // console.log( nodeMap );
-
-    // find a record create/update/delete and trace back to a decision or screen
-    let relevantTypesSet = new Set( [ 'recordCreates', 'recordUpdates', 'recordDeletes', 'actionCalls'
-                            , 'subflows', 'recordLookups' ] );
-    let descriptionArray = [];
-
-    // follow the flow element sequence and create descriptions at relevant points
-    let startingElement = flowDefinition.startElementReference ?? 
-                            flowDefinition.start?.connector?.targetReference ?? 
-                            flowDefinition.start?.scheduledPaths[ 0 ].connector?.targetReference;
-    let currentNode = nodeMap.get( startingElement );
-    let lastDecisionNode, lastDecisionNodeWithPendingBranches;
-    let lastScreenNode;
-    let nextNode = nodeMap.get( currentNode.targetName );
-    let visitedCountMap = new Map();
-    let nodesAlreadyDescribedSet = new Set();
-    while( nextNode || lastDecisionNodeWithPendingBranches ) {
-        // if there are no nodes left to visit, revisit the last decision that wasn't fully explored
-        if( ! nextNode ) {
-            nextNode = lastDecisionNodeWithPendingBranches;
-            // reset last screen that was from different context
-            lastScreenNode = null;
-        }
-
-        // check if non-decision node has already been visited
-        if( nextNode && nextNode.visitCount > 0 
-                && nextNode.type !== 'decisions' && nextNode.type !== 'loops' ) {
-            // node has already been visited, so we're in a loop and can exit
-            break;
-        }
-
-        nextNode.visitCount ++;
-
-        // what will be the subsequent node to visit
-        let nextNodeName = nextNode.targetName;
-
-        // count how many times this decision node has been visited
-        // TODO:  implement for loops too
-        if( nextNode.type === 'decisions' ) {
-            // increase count to determine which of this decision's rule branch to visit next
-            let visitedCount = 0;
-            if( visitedCountMap.has( nextNode.name ) ) {
-                visitedCount = visitedCountMap.get( nextNode.name ) + 1;
-            }
-            visitedCountMap.set( nextNode.name, visitedCount );
-
-            // get the next node from the rule that hasn't been visited yet
-            if( visitedCount === nextNode.rules.length ) {
-                // all rules have been visited, proceed to the default branch
-                nextNodeName = nextNode.defaultConnector?.targetReference;
-                lastDecisionNodeWithPendingBranches = null;
-            } else {
-                nextNodeName = nextNode.rules[ visitedCount ].connector?.targetReference;
-                lastDecisionNodeWithPendingBranches = nextNode;
-            }
-        }
-
-        // count how many times this loop node has been visited
-        if( nextNode.type === 'loops' ) {
-            // increase count to determine which of this loop's branch to visit next
-            let visitedCount = 0;
-            if( visitedCountMap.has( nextNode.name ) ) {
-                visitedCount = visitedCountMap.get( nextNode.name ) + 1;
-            }
-            visitedCountMap.set( nextNode.name, visitedCount );
-
-            // get the next node from the loop that hasn't been visited yet
-            if( visitedCount === 1 ) {
-                // now that the main loop elements have been visited, proceed to the exit branch
-                nextNodeName = nextNode.noMoreValuesConnector?.targetReference;
-                lastDecisionNodeWithPendingBranches = null;
-            } else {
-                nextNodeName = nextNode.nextValueConnector?.targetReference;
-                lastDecisionNodeWithPendingBranches = nextNode;
-            }
-        }
-
-        if( currentNode.type === 'screens' ) {
-            lastScreenNode = currentNode;
-        }
-        if( currentNode.type === 'decisions' ) {
-            lastDecisionNode = currentNode;
-        }
-
-        // skip if node not relevant
-        if( ! relevantTypesSet.has( nextNode.type ) ) {
-            currentNode = nextNode;
-            nextNode = nodeMap.get( nextNodeName );
-            continue;
-        }
-
-        // avoid duplicate descriptions
-        if( nodesAlreadyDescribedSet.has( nextNode.name ) ) {
-            currentNode = nextNode;
-            nextNode = nodeMap.get( nextNodeName );
-            continue;
-        }
-        nodesAlreadyDescribedSet.add( nextNode.name )
-
-        // create a description from the pair of nodes
-        let recordAction = ( nextNode.type === 'recordCreates' ? 'inserts ' : '' )
-                            + ( nextNode.type === 'recordUpdates' ? 'updates ' : '' )
-                            + ( nextNode.type === 'recordDeletes' ? 'deletes ' : '' );
-        let targetOfAction = nextNode.object ?? nextNode.inputReference;
-        let description = ( recordAction ? recordAction + targetOfAction + ' record ' : '' )
-                        + ( nextNode.type === 'actionCalls' ? 'calls action ' 
-                                        + nextNode.actionName + " (" + nextNode.actionType + ") " : '' )
-                        + ( nextNode.type === 'subflows' ? 'calls flow ' 
-                                        + nextNode.name + " (" + nextNode.flowName + ") " : '' );;
-        if( lastScreenNode ) {
-            description = description + "after " + screenMap.get( lastScreenNode.name );
-        }
-        if( lastDecisionNode ) {
-            let ruleIndex = visitedCountMap.get( lastDecisionNode.name );
-            ruleIndex = ruleIndex ?? 0;
-            ruleIndex = Math.min( ruleIndex, lastDecisionNode.rules.length - 1 );
-            let ruleLabel = lastDecisionNode.rules[ ruleIndex ].label
-            description = description + ( lastScreenNode ? " and " : "" )
-                            + "after checking " + lastDecisionNode.label + ': ' + ruleLabel; //decisionMap.get( lastDecisionNode.name );
-        }
-
-        descriptionArray.push( description );
-
-        currentNode = nextNode;
-        nextNode = nodeMap.get( nextNodeName );
-    }
-
-    return descriptionArray;
-}
-
-function removeHTML( aValue ) {
-    return aValue.replaceAll( /\<\/?.*?\>/g, '' );
 }
 
 // arrow geometry:  the shaft spans the gap between the element and the
@@ -542,24 +341,11 @@ function displayTooltip( event, displayFlag ) {
     const autoLayout = ( layout == 'AUTO_LAYOUT_CANVAS' );
 
     // collect nodes in the flow metadata and index them in a map
-    const definitionMap = new Map( [
-        [ 'recordCreates', flowDefinition.recordCreates ]
-        , [ 'recordUpdates', flowDefinition.recordUpdates ]
-        , [ 'recordDeletes', flowDefinition.recordDeletes ]
-        , [ 'recordLookups', flowDefinition.recordLookups ]
-        , [ 'transforms', flowDefinition.transforms ]
-        , [ 'decisions', flowDefinition.decisions ]
-        , [ 'subflows', flowDefinition.subflows ]
-        , [ 'screens', flowDefinition.screens ]
-        , [ 'actionCalls', flowDefinition.actionCalls ]
-        , [ 'assignments', flowDefinition.assignments ]
-        , [ 'loops', flowDefinition.loops ]
-        , [ 'collectionProcessors', flowDefinition.collectionProcessors ]
-    ] );
+    const definitionMap = buildDefinitionMap( flowDefinition );
 
     // tooltip on the start flow element
     if( isStartNode( event.currentTarget, autoLayout ) ) {
-        let descriptionArray = indexElementsAndReturnDescription( definitionMap );
+        let descriptionArray = describeFlow( flowDefinition, definitionMap );
 
         if( descriptionArray.length > 0 ) {
             createTooltip( {
@@ -579,15 +365,7 @@ function displayTooltip( event, displayFlag ) {
     let elementName = event.currentTarget.dataset.flowElementName;
 
     // find element node in the flow metadata
-    let node;
-    for( const [key, value] of definitionMap ) {
-        node = findNodeByNameInArray( elementName, value );
-        if( node ) {
-            node.type = key;
-            break;
-        }
-    }
-
+    let node = findElementByLabel( definitionMap, elementName );
     if( ! node ) {
         return;
     }
@@ -662,8 +440,7 @@ function displayTooltip( event, displayFlag ) {
         let fieldText = aField.fieldText;
 
         if( aField.fieldType === "DisplayText" ) {
-            // remove HTML
-            fieldText = fieldText.replaceAll( /\<\/?.*?\>/g, '' );
+            fieldText = removeHTML( fieldText );
         }
 
         if( aField.fieldType === "ComponentInstance" ) {

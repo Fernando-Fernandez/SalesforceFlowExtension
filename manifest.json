@@ -13,9 +13,9 @@
     , "content_scripts": [
       {
         "js": [
+          "scripts/flowParser.js",
           "scripts/content.js"
         ]
-        , "type": "module"
         , "matches": [
           "https://*.salesforce.com/*",
           "https://*.salesforce-setup.com/*",
