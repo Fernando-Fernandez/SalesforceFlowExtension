@@ -767,7 +767,20 @@ class FlowParser {
         };
         sendToGPT( dataObject, openAIKey );
     };
+    }
 }
+
+// entry points:  set-key button and flow definition sent by the content script
+dom.setKeyButton.addEventListener( 'click', function() { setKey(); } );
+
+chrome.runtime.onMessage.addListener(
+    function( request, sender, sendResponse ) {
+        if( request.flowDefinition ) {
+            // fresh parser per message so traversal state (index, forks) starts clean
+            new FlowParser().parse( request.flowDefinition );
+        }
+    }
+);
 
 // function getCSVFromMarkDown( stepByStepMDTable ) {
 //     let table = stepByStepMDTable
