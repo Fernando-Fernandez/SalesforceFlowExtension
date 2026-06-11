@@ -168,6 +168,20 @@ describe('DOM Interactions', () => {
       expect(customInput.value).toBe('gpt-4-turbo');
     });
 
+    test('should detect the start node from a text line at any depth', () => {
+      // mirrors isStartNode in content.js: instead of a fixed child path like
+      // children[0].children[1].children[1], any line of the node's visible
+      // text equal to "Start" marks the auto-layout start node
+      const containsStartLabel = (innerText) =>
+        (innerText ?? '').split('\n').some(line => line.trim() === 'Start');
+
+      expect(containsStartLabel('Record-Triggered Flow\nStart\nRun Immediately')).toBe(true);
+      expect(containsStartLabel('  Start  ')).toBe(true);
+      expect(containsStartLabel('Get Started Screen\nshows fields')).toBe(false);
+      expect(containsStartLabel('Restart Loop')).toBe(false);
+      expect(containsStartLabel(undefined)).toBe(false);
+    });
+
     test('should send flow definition only once when ready message and load both fire', () => {
       // content.js sends the definition on the popup's "ready" postMessage with
       // the iframe load event as fallback; the second signal must be a no-op

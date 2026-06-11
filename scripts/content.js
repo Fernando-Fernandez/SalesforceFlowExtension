@@ -10,11 +10,29 @@ const POPUP_READY_MESSAGE = "sfFlowExtensionPopupReady";
 const DEFAULT_API_VERSION = 'v57.0';
 const BUTTON_STYLE = "background-color: blueviolet!important; color: white!important; \
 margin-right: 30px; ";
+const SHOW_DEFINITION_BUTTON_ID = "sfFlowExtensionViewDefinition";
+
+// every Salesforce DOM dependency in one place:  when a Salesforce release
+// breaks element discovery, this block is what needs updating
+const SELECTORS = {
+    // identifies a Salesforce page
+    salesforcePage: "body.sfdcBody, body.ApexCSIPage, #auraLoadingBox"
+    // flow nodes in auto-layout mode, free-form mode, and the start node
+    , flowNodes: "div.node-container, span.text-element-label, div.start-node-box"
+    // class of the start node in free-form mode
+    , startNodeClass: "start-node-box"
+    // visible label of the start node in auto-layout mode
+    , startNodeLabel: "Start"
+    // toolbar combobox the View Definition button is inserted before
+    , flowComboBox: "lightning-combobox.slds-form-element"
+    // canvas container that hosts the definition iframe
+    , flowContainer: "div.slds-col.slds-grow.slds-grid.slds-is-relative.slds-scrollable_none"
+};
 
 let sfHost, sessionId, flowDefinition;
 
 // only execute event setup if within a Salesforce page
-let sfElement = document.querySelector( "body.sfdcBody, body.ApexCSIPage, #auraLoadingBox" );
+let sfElement = document.querySelector( SELECTORS.salesforcePage );
 if( sfElement ) {
     // get host and session from background script
     let getHostMessage = { message: GETHOSTANDSESSION
@@ -71,37 +89,53 @@ async function setFlowDefinitionFromToolingAPI( baseUrl, sessionId ) {
     waitForFlowUI();
 }
 
-let getNodesTimeout;
+const REATTACH_DEBOUNCE_MS = 500;
+let reattachTimer;
 function waitForFlowUI() {
-    // attempt to get list of flow nodes repeatedly, in both auto-layout and free-form modes
-    let flowShapes = document.querySelectorAll( 
-                        "div.node-container, span.text-element-label,div.start-node-box" );
+    // attach to whatever is already rendered, then keep watching the page:
+    // the canvas builds asynchronously and re-renders nodes on pan/zoom/edit,
+    // which replaces the elements holding the hover handlers
+    setupFlowUI();
+
+    const observer = new MutationObserver( () => {
+        clearTimeout( reattachTimer );
+        reattachTimer = setTimeout( setupFlowUI, REATTACH_DEBOUNCE_MS );
+    } );
+    observer.observe( document.body, { childList: true, subtree: true } );
+}
+
+// idempotent:  hover handlers are assigned as properties and the button is
+// only inserted when missing, so the observer can call this repeatedly
+function setupFlowUI() {
+    let flowShapes = document.querySelectorAll( SELECTORS.flowNodes );
     if( flowShapes.length <= 0 ) {
-        // nodes not created, try again in 2 secs
-        getNodesTimeout = setTimeout( () => {
-            waitForFlowUI();
-        }, 2000 );
         return;
     }
 
-    clearTimeout( getNodesTimeout );
-
-    addHoverEvents();
+    addHoverEvents( flowShapes );
 
     addShowDefinitionButton();
 }
 
 function addShowDefinitionButton() {
+    if( document.getElementById( SHOW_DEFINITION_BUTTON_ID ) ) {
+        return;
+    }
     // insert button before the combobox
-    let flowComboBox = document.querySelector( "lightning-combobox.slds-form-element" );
+    let flowComboBox = document.querySelector( SELECTORS.flowComboBox );
+    if( ! flowComboBox ) {
+        // toolbar not rendered yet, the observer will call again
+        return;
+    }
     let showDefinitionButton = document.createElement( "button" );
+    showDefinitionButton.setAttribute( "id", SHOW_DEFINITION_BUTTON_ID );
     showDefinitionButton.setAttribute( "class", "slds-button slds-button_neutral" );
     showDefinitionButton.setAttribute( "style", BUTTON_STYLE );
     showDefinitionButton.innerText = "View Definition (Flow Extension)";
     flowComboBox.parentElement.insertBefore( showDefinitionButton, flowComboBox );
 
-    showDefinitionButton.addEventListener( "click", function() { 
-        showDefinition( showDefinitionButton ); 
+    showDefinitionButton.addEventListener( "click", function() {
+        showDefinition( showDefinitionButton );
     } );
 }
 
@@ -110,8 +144,7 @@ function showDefinition( showDefinitionButton ) {
     let flowIframe = document.getElementById( "flowIframe" );
 
     if( ! flowIframe ) {
-        let flowContainer = document.querySelector(
-                            "div.slds-col.slds-grow.slds-grid.slds-is-relative.slds-scrollable_none" );
+        let flowContainer = document.querySelector( SELECTORS.flowContainer );
         // append iframe
         let popupSrc = chrome.runtime.getURL( "popup.html" );
         flowIframe = document.createElement( "iframe" );
@@ -166,20 +199,7 @@ function showDefinition( showDefinitionButton ) {
     }
 }
 
-function addHoverEvents() {
-    // attempt to get list of flow nodes repeatedly, in both auto-layout and free-form modes
-    let flowShapes = document.querySelectorAll( 
-                        "div.node-container, span.text-element-label,div.start-node-box" );
-    if( flowShapes.length <= 0 ) {
-        // nodes not created, try again in 2 secs
-        getNodesTimeout = setTimeout( () => {
-            addHoverEvents();
-        }, 2000 );
-        return;
-    }
-
-    clearTimeout( getNodesTimeout );
-
+function addHoverEvents( flowShapes ) {
     // add mouse over/out events to each of the flow nodes
     for( let i = 0; i < flowShapes.length; i++ ) {
         let flowShape = flowShapes[ i ];
@@ -200,7 +220,7 @@ function addHoverEvents() {
         flowShape.dataset.flowElementName = flowElementName;
 
         // handler properties instead of addEventListener so repeated
-        // waitForFlowUI/addHoverEvents passes replace instead of stacking
+        // observer-triggered setupFlowUI passes replace instead of stacking
         flowShape.onmouseover = ( event ) => {
             displayTooltip( event, true );
         };
@@ -226,8 +246,8 @@ function appendNodeAndLine( aNode ) {
 }
 
 function getValue( aValue ) {
-    return aValue.elementReference ?? aValue.stringValue ?? aValue.numberValue
-                ?? aValue.booleanValue?? aValue.dateTimeValue?? aValue.dateValue;
+    return aValue ? ( aValue.elementReference ?? aValue.stringValue ?? aValue.numberValue
+                ?? aValue.booleanValue?? aValue.dateTimeValue?? aValue.dateValue ) : null;
 }
 
 function indexElementsAndReturnDescription( definitionMap ) {
@@ -421,19 +441,31 @@ function removeHTML( aValue ) {
     return aValue.replaceAll( /\<\/?.*?\>/g, '' );
 }
 
+// arrow geometry:  the shaft spans the gap between the element and the
+// tooltip, with the tip slightly overlapping the element's right edge
+const ARROW_SHAFT_LENGTH = 150;
+const ARROW_TIP_OVERLAP = 10;
+const ARROW_HEIGHT = 25;
+const ARROW_VERTICAL_OFFSET = 5;
+
 // destructured parameters with defaults
-function createTooltip( { 
+function createTooltip( {
             elementName = 'This flow: '
             , currentTarget = ''
-            , offsetHorizontal = 350
-            , offsetVertical = 0
-            , arrowYDistance = 65
         } = {} ) {
-    // read flow element position and add offset
-    let leftPos = offsetHorizontal + parseInt( currentTarget.style.left );
-    leftPos = isNaN( leftPos ) ? offsetHorizontal : leftPos;
-    let topPos = offsetVertical + parseInt( currentTarget.style.top );
-    topPos = isNaN( topPos ) ? offsetVertical : topPos;
+    // anchor on the hovered element's box:  free-form elements carry their
+    // canvas position in style.left/top, auto-layout ones are positioned by
+    // their container (so both default to 0)
+    let elementLeft = parseInt( currentTarget.style.left );
+    elementLeft = isNaN( elementLeft ) ? 0 : elementLeft;
+    let topPos = parseInt( currentTarget.style.top );
+    topPos = isNaN( topPos ) ? 0 : topPos;
+
+    // place the tooltip past the element's rendered width (squares in
+    // free-form, wide rectangles in auto-layout) plus the arrow shaft,
+    // so neither the arrow nor the tooltip covers the element
+    let leftPos = elementLeft + currentTarget.offsetWidth + ARROW_SHAFT_LENGTH;
+
     tooltip = document.createElement( "div" );
     tooltip.setAttribute( "style", "border: solid 1px darkgray; word-wrap: break-word; white-space: normal; " 
                                     + "background-color: lightyellow; width:30em; " 
@@ -447,11 +479,14 @@ function createTooltip( {
     currentTarget.parentNode.appendChild( tooltip );
 
     arrow = document.createElement( "div" );
-    const distanceX = 200, distanceY = 10; // auto-layout should result in top -65, left 50 (with width 350)
-    arrow.setAttribute( "style", "width: " + distanceX + "px; height: 25px; \
-background-color: darkgray; z-index: 998; position: relative; \
+    // positioned absolutely in the same coordinate system as the tooltip so it
+    // sits at the tooltip's height in both layouts; the arrowhead points left,
+    // its tip just touching the element, and the shaft ends at the tooltip
+    let arrowWidth = ARROW_SHAFT_LENGTH + ARROW_TIP_OVERLAP;
+    arrow.setAttribute( "style", "width: " + arrowWidth + "px; height: " + ARROW_HEIGHT + "px; \
+background-color: darkgray; z-index: 998; position: absolute; \
 clip-path: polygon(0% 50%, 15px 0%, 15px 47%, 100% 47%, 100% 53%, 15px 53%, 15px 100% ); \
-top: " + ( topPos - arrowYDistance ) + "px; left: " + ( leftPos - distanceX ) + "px;" );
+top: " + ( topPos + ARROW_VERTICAL_OFFSET ) + "px; left: " + ( leftPos - arrowWidth ) + "px;" );
     currentTarget.parentNode.appendChild( arrow );
 
     // keep the tooltip open while the mouse is over it (long tooltips
@@ -473,6 +508,17 @@ function removeTooltip() {
 function scheduleTooltipRemoval() {
     clearTimeout( hideTooltipTimer );
     hideTooltipTimer = setTimeout( removeTooltip, TOOLTIP_HIDE_DELAY_MS );
+}
+
+function isStartNode( target, autoLayout ) {
+    // free-form mode marks the start node with a dedicated class
+    if( target.classList.contains( SELECTORS.startNodeClass ) ) {
+        return true;
+    }
+    // in auto-layout mode the start node shows a "Start" label; match it as a
+    // text line at any depth instead of relying on a fixed child structure
+    return autoLayout && ( target.innerText ?? '' ).split( '\n' )
+                            .some( line => line.trim() === SELECTORS.startNodeLabel );
 }
 
 function displayTooltip( event, displayFlag ) {
@@ -512,33 +558,14 @@ function displayTooltip( event, displayFlag ) {
     ] );
 
     // tooltip on the start flow element
-    const containsStart = event.currentTarget.children?.[0]?.children?.[1]?.children?.[1]?.innerText == 'Start'
-                    || event.currentTarget.children?.[1]?.children?.[1]?.children?.[1]?.innerText == 'Start'
-    const isStartElement = event.currentTarget.className === 'start-node-box'
-                    || ( autoLayout && containsStart );
-
-    if( isStartElement ) {
+    if( isStartNode( event.currentTarget, autoLayout ) ) {
         let descriptionArray = indexElementsAndReturnDescription( definitionMap );
 
         if( descriptionArray.length > 0 ) {
-            if( autoLayout ) {
-                createTooltip( { 
-                    elementName: 'This flow: '
-                    , currentTarget: event.currentTarget
-                    , offsetHorizontal: 350
-                    , offsetVertical: 0
-                    , arrowYDistance: 65
-                } );
-
-            } else {
-                createTooltip( { 
-                    elementName: 'This flow: '
-                    , currentTarget: event.currentTarget
-                    , offsetHorizontal: 400
-                    , offsetVertical: 0
-                    , arrowYDistance: 98 //121
-                } );
-            }
+            createTooltip( {
+                elementName: 'This flow: '
+                , currentTarget: event.currentTarget
+            } );
 
             descriptionArray.forEach( aDescription => {
                 let descriptionNode = document.createTextNode( ' - ' + aDescription );
@@ -565,24 +592,10 @@ function displayTooltip( event, displayFlag ) {
         return;
     }
 
-    if( autoLayout ) {
-        createTooltip( { 
-            elementName: elementName
-            , currentTarget: event.currentTarget
-            , offsetHorizontal: 270
-            , offsetVertical: 0
-            , arrowYDistance: 60
-        } );
-
-    } else {
-        createTooltip( { 
-            elementName: elementName
-            , currentTarget: event.currentTarget
-            , offsetHorizontal: 270
-            , offsetVertical: 0
-            , arrowYDistance: 1
-        } );
-    }
+    createTooltip( {
+        elementName: elementName
+        , currentTarget: event.currentTarget
+    } );
 
     // get subflow name if calling subflow
     try {
