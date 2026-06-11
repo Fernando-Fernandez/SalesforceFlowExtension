@@ -168,6 +168,27 @@ describe('DOM Interactions', () => {
       expect(customInput.value).toBe('gpt-4-turbo');
     });
 
+    test('should send flow definition only once when ready message and load both fire', () => {
+      // content.js sends the definition on the popup's "ready" postMessage with
+      // the iframe load event as fallback; the second signal must be a no-op
+      const sendMessage = jest.fn();
+
+      let definitionSent = false;
+      const sendDefinitionOnce = () => {
+        if (definitionSent) {
+          return;
+        }
+        definitionSent = true;
+        sendMessage({ flowDefinition: { label: 'Test Flow' } });
+      };
+
+      // simulate the popup ready message arriving first, then the load event
+      sendDefinitionOnce();
+      sendDefinitionOnce();
+
+      expect(sendMessage).toHaveBeenCalledTimes(1);
+    });
+
     test('should not stack duplicate handlers when parseFlow runs again', () => {
       // parseFlow assigns handler properties (onclick/onchange/oninput) instead of
       // addEventListener, so receiving a second flow definition replaces the

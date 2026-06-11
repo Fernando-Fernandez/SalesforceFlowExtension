@@ -782,6 +782,13 @@ chrome.runtime.onMessage.addListener(
     }
 );
 
+// announce readiness to the embedding page so the content script can send the
+// flow definition as soon as the listener above exists (no payload, so the
+// wildcard target origin is safe)
+if( window.parent !== window ) {
+    window.parent.postMessage( "sfFlowExtensionPopupReady", "*" );
+}
+
 // function getCSVFromMarkDown( stepByStepMDTable ) {
 //     let table = stepByStepMDTable
 //                         .replaceAll( "|\n|-|-|-|-|-|-|\n|", "\"\n\"" )

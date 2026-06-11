@@ -5,6 +5,7 @@
 // the handlers will display a tooltip with information from the element found in the flow definition
 
 const GETHOSTANDSESSION = "getHostSession";
+const POPUP_READY_MESSAGE = "sfFlowExtensionPopupReady";
 const TOOLING_API_VERSION = 'v57.0';
 const BUTTON_STYLE = "background-color: blueviolet!important; color: white!important; \
 margin-right: 30px; ";
@@ -88,13 +89,12 @@ function addShowDefinitionButton() {
     } );
 }
 
-let instantiationTimer;
 function showDefinition( showDefinitionButton ) {
 
     let flowIframe = document.getElementById( "flowIframe" );
 
     if( ! flowIframe ) {
-        let flowContainer = document.querySelector( 
+        let flowContainer = document.querySelector(
                             "div.slds-col.slds-grow.slds-grid.slds-is-relative.slds-scrollable_none" );
         // append iframe
         let popupSrc = chrome.runtime.getURL( "popup.html" );
@@ -107,30 +107,47 @@ function showDefinition( showDefinitionButton ) {
         flowIframe.setAttribute( "width", flowContainer.offsetWidth - 10 );
         flowIframe.setAttribute( "height", flowContainer.offsetHeight - 10 );
         // flowIframe.style.marginLeft = "5rem";
+
+        // send the definition once the iframe can receive it:  the primary signal
+        // is the "ready" message popup.js posts right after registering its
+        // message listener, with the iframe load event as fallback;
+        // whichever fires first wins, the other is ignored
+        let definitionSent = false;
+        let sendDefinitionOnce = () => {
+            if( definitionSent ) {
+                return;
+            }
+            definitionSent = true;
+            chrome.runtime.sendMessage( { flowDefinition } );
+        };
+        window.addEventListener( "message", ( event ) => {
+            if( event.source === flowIframe.contentWindow
+                    && event.data === POPUP_READY_MESSAGE ) {
+                sendDefinitionOnce();
+            }
+        } );
+        flowIframe.addEventListener( "load", sendDefinitionOnce );
+
         flowIframe.src = popupSrc;
         flowContainer.appendChild( flowIframe );
 
         flowIframe.style.display = "block";
         showDefinitionButton.innerText = "Hide Definition";
-
-    } else {
-        if( flowIframe.style.display == "none" ) {
-            flowIframe.style.display = "block";
-            showDefinitionButton.innerText = "Hide Definition";
-
-        } else {
-            // hide flow iframe if visible
-            flowIframe.style.display = "none";
-            showDefinitionButton.innerText = "View Definition";
-            return;
-        }
+        return;
     }
 
-    // wait for the iframe to load and then send the flow definition to it
-    instantiationTimer = setTimeout( () => {
-        clearTimeout( instantiationTimer );
+    if( flowIframe.style.display == "none" ) {
+        flowIframe.style.display = "block";
+        showDefinitionButton.innerText = "Hide Definition";
+
+        // iframe is already loaded, so refresh its contents right away
         chrome.runtime.sendMessage( { flowDefinition } );
-    }, 1000 );
+
+    } else {
+        // hide flow iframe if visible
+        flowIframe.style.display = "none";
+        showDefinitionButton.innerText = "View Definition";
+    }
 }
 
 function addHoverEvents() {
