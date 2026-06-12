@@ -1,0 +1,119 @@
+// Integration test: loads the real scripts/popup.js + scripts/flowParser.js in
+// jsdom, delivers a flow definition through the message listener, and asserts
+// the page renders. Guards against parse() exceptions leaving a blank popup.
+
+describe('popup parse integration', () => {
+  let messageListener;
+
+  beforeAll(() => {
+    // the element ids popup.js caches at load (mirrors popup.html)
+    document.body.innerHTML = `
+      <div id="defaultExplainer"></div>
+      <div id="lintResults"></div>
+      <div id="gptDialogContainer" style="display:none;"></div>
+      <input id="gptQuestion" type="text" />
+      <button id="gptButton"></button>
+      <span id="error"></span>
+      <div id="spinner"></div>
+      <span id="response"></span>
+      <label for="openAIKey"></label>
+      <input id="openAIKey" type="password" />
+      <button id="setKey"></button>
+      <div id="gptModelSelection" style="display:none;">
+        <div class="custom-model-input" style="display:none;">
+          <input type="text" id="custom-model-name" />
+        </div>
+        <input type="radio" name="gpt-version" value="gpt-4o" checked>
+      </div>
+      <button id="downloadButton" style="display:none;"></button>
+      <div id="flowTableContainer" style="display:none;"></div>
+    `;
+
+    global.chrome = {
+      runtime: {
+        onMessage: {
+          addListener: (fn) => { messageListener = fn; }
+        }
+      },
+      storage: {
+        local: {
+          get: async () => ({}),
+          set: async () => {}
+        }
+      }
+    };
+
+    require('../scripts/flowParser.js');
+    require('../scripts/popup.js');
+  });
+
+  test('should render explanation, lint results and table from a definition', async () => {
+    expect(messageListener).toBeDefined();
+
+    const flowDefinition = {
+      label: 'Test Flow',
+      description: '',
+      processType: 'AutoLaunchedFlow',
+      processMetadataValues: [
+        { name: 'BuilderType', value: { stringValue: 'LightningFlowBuilder' } },
+        { name: 'CanvasMode', value: { stringValue: 'AUTO_LAYOUT_CANVAS' } }
+      ],
+      start: {
+        connector: { targetReference: 'Get_Accounts' },
+        triggerType: 'RecordAfterSave',
+        recordTriggerType: 'CreateAndUpdate',
+        object: 'Account'
+      },
+      recordLookups: [{
+        name: 'Get_Accounts', label: 'Get Accounts', object: 'Account',
+        getFirstRecordOnly: false, storeOutputAutomatically: true,
+        filters: [{ field: 'OwnerId', operator: 'EqualTo', value: { stringValue: '0053000000abcDE' } }],
+        connector: { targetReference: 'Check_Status' }
+      }],
+      decisions: [{
+        name: 'Check_Status', label: 'Check Status',
+        defaultConnectorLabel: 'Otherwise',
+        rules: [{
+          name: 'Active', label: 'Is Active',
+          conditions: [{ leftValueReference: 'Get_Accounts.Active__c', operator: 'EqualTo', rightValue: { booleanValue: true } }],
+          connector: { targetReference: 'Loop_Accounts' }
+        }]
+      }],
+      loops: [{
+        name: 'Loop_Accounts', label: 'Loop Accounts', collectionReference: 'Get_Accounts',
+        iterationOrder: 'Asc',
+        nextValueConnector: { targetReference: 'Update_Acct' }
+      }],
+      recordUpdates: [{
+        name: 'Update_Acct', label: 'Update Acct', inputReference: 'Loop_Accounts',
+        inputAssignments: [{ field: 'Status__c', value: { stringValue: 'Reviewed' } }],
+        connector: { targetReference: 'Loop_Accounts' }
+      }],
+      screens: [{
+        name: 'Orphan_Screen', label: 'Orphan Screen',
+        fields: [{ fieldType: 'DisplayText', fieldText: '<b>Hello</b>' }]
+      }],
+      variables: [{ name: 'varCount', dataType: 'Number', isCollection: false, isInput: true, isOutput: false }],
+      formulas: [{ name: 'fxDate', dataType: 'Date', expression: 'TODAY()' }],
+      textTemplates: [{ name: 'tt', text: '<p>hi</p>', isViewedAsPlainText: false }],
+      constants: [{ name: 'cMax', dataType: 'Number', value: { numberValue: 5 } }]
+    };
+
+    await messageListener({ flowDefinition }, {}, () => {});
+    // parse() is async fire-and-forget from the listener; let it settle
+    await new Promise(resolve => setTimeout(resolve, 0));
+
+    const explainer = document.getElementById('defaultExplainer');
+    expect(explainer.textContent).toContain('This flow:');
+    expect(explainer.textContent).toContain('queries Account records');
+    expect(explainer.textContent).toContain('updates Loop_Accounts record for each item in Loop Accounts');
+
+    const lint = document.getElementById('lintResults');
+    expect(lint.textContent).toContain('Potential issues:');
+    expect(lint.textContent).toContain('Update_Acct');
+
+    const table = document.getElementById('flowTableContainer');
+    expect(table.style.display).toBe('block');
+    expect(table.querySelectorAll('tbody tr').length).toBeGreaterThan(0);
+  });
+});

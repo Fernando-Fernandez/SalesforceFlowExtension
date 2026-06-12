@@ -30,7 +30,11 @@ const SELECTORS = {
 };
 
 // shared parsing helpers from flowParser.js, which the manifest loads first
-const { getValue, removeHTML, buildDefinitionMap, findElementByLabel, describeFlow } = FlowParserShared;
+const { getValue, removeHTML, buildDefinitionMap, findElementByLabel
+        , getFlowOverview, renderExplanation } = FlowParserShared;
+
+// the start-node tooltip shows at most this many summary lines
+const MAX_TOOLTIP_LINES = 15;
 
 let sfHost, sessionId, flowDefinition;
 
@@ -345,7 +349,13 @@ function displayTooltip( event, displayFlag ) {
 
     // tooltip on the start flow element
     if( isStartNode( event.currentTarget, autoLayout ) ) {
-        let descriptionArray = describeFlow( flowDefinition, definitionMap );
+        const { facts } = getFlowOverview( flowDefinition );
+        let descriptionArray = renderExplanation( facts );
+        if( descriptionArray.length > MAX_TOOLTIP_LINES ) {
+            const hiddenCount = descriptionArray.length - MAX_TOOLTIP_LINES;
+            descriptionArray = descriptionArray.slice( 0, MAX_TOOLTIP_LINES );
+            descriptionArray.push( `…and ${ hiddenCount } more` );
+        }
 
         if( descriptionArray.length > 0 ) {
             createTooltip( {

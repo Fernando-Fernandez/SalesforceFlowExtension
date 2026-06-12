@@ -85,6 +85,7 @@ const CONFIG = {
 const dom = {
     setKeyButton: document.getElementById('setKey'),
     defaultExplainer: document.getElementById('defaultExplainer'),
+    lintResults: document.getElementById('lintResults'),
     response: document.getElementById('response'),
     error: document.getElementById('error'),
     spinner: document.getElementById('spinner'),
@@ -405,49 +406,31 @@ class FlowParser {
     }
 
     async parse( flowDefinition ) {
+        // surface any parsing failure instead of leaving the popup blank
+        try {
+            await this.parseAndRender( flowDefinition );
+        } catch( e ) {
+            console.error( 'Flow parsing failed:', e );
+            dom.error.textContent = 'Could not parse this flow: ' + e.message;
+            dom.spinner.style.display = 'none';
+        }
+    }
+
+    async parseAndRender( flowDefinition ) {
         // console.log( flowDefinition );
 
         let flowName = 'Flow:  ' + flowDefinition.label;
         let flowDescription = flowDefinition.description;
 
 
-        // identify initial step
-        let startElement = flowDefinition.startElementReference ?? flowDefinition.start?.connector?.targetReference;
-
-        let firstElement = flowDefinition.start;
-        if( ! firstElement ) {
-            firstElement = { connector: { targetReference: startElement } };
-        }
-        firstElement.name = 'Start';
-        firstElement.fullDescription = firstElement.name;
-        firstElement.type = CONFIG.FLOW.element_types.start;
-        firstElement.branchArray = [];
-        firstElement.parameters = this.getParameters( firstElement );
-
-        if( firstElement.connector?.targetReference ) {
-            firstElement.branchArray.push( firstElement.connector?.targetReference );
-        }
-
-        firstElement.scheduledPaths?.forEach( s => {
-            firstElement.branchArray.push( s.connector?.targetReference );
-        } );
-
-        // start map of actions indexed by name with the starting element
-        let actionMap = new Map();
-        actionMap.set( firstElement.name, firstElement );
-
-        // collect nodes in the flow metadata and index them in a map
-        const definitionMap = FlowParserShared.buildDefinitionMap( flowDefinition );
-
-        // reorganize flow elements into a single map indexed by name
-        for( const [ typeName, array ] of definitionMap ) {
-            if( ! array || array.length <= 0 ) {
-                continue;
-            }
-            for( let i = 0; i < array.length; i++ ) {
-                let element = array[ i ];
-                element.type = typeName.substring( 0, typeName.length - 1 );
-
+        // build the element graph (start element, branch wiring) and decorate
+        // it with the table presentation fields
+        const { actionMap: graphMap, firstElement } = FlowParserShared.buildElementGraph( flowDefinition );
+        let actionMap = graphMap;
+        for( const [ , element ] of actionMap ) {
+            if( element.type === CONFIG.FLOW.element_types.start ) {
+                element.fullDescription = element.name;
+            } else {
                 element.fullDescription = element.name
                                         + this.parenthesis( element.label )
                                         + ( element.description ? ' / ' + element.description : '' );
@@ -456,51 +439,8 @@ class FlowParser {
                                             || element.type == 'formula'
                                             || element.type == 'textTemplate' ? '' :
                             ( element.type == 'decision' ? element.defaultConnectorLabel : 'success' ) );
-
-                element.nextElement = ( element.connector?.targetReference != undefined ?
-                                            element.connector?.targetReference :
-                                            element.defaultConnector?.targetReference );
-
-                // list the branches of execution
-                element.branchArray = [];
-                element.branchLabelArray = [];
-                if( element.nextElement != undefined ) {
-                    element.branchArray.push( element.nextElement );
-                    element.branchLabelArray.push( `${element.label} is true` );
-                }
-
-                if( element.faultConnector?.targetReference ) {
-                    element.faultElement = element.faultConnector?.targetReference;
-                    element.branchArray.push( element.faultElement );
-                    element.branchLabelArray.push( `fails on ${element.label}` );
-                }
-
-                if( element.type == 'loop' ) {
-                    element.branchArray.push( element.nextValueConnector?.targetReference );
-                    element.branchLabelArray.push( `next value on ${element.label}` );
-                    element.branchArray.push( element.noMoreValuesConnector?.targetReference );
-                    element.branchLabelArray.push( `no more values on ${element.label}` );
-                }
-
-                if( element.type == 'wait' ) {
-                    element.waitEvents?.forEach( w => {
-                        element.branchArray.push( w.connector?.targetReference );
-                        element.branchLabelArray.push( `wait event ${w.label}` );
-                    } );
-                }
-
-                if( element.rules != undefined && element.rules.length > 0 ) {
-                    element.rules?.forEach( r => {
-                        element.branchArray.push( r.connector?.targetReference );
-                        element.branchLabelArray.push( `condition ${r.label} on ${element.label}` );
-                    } );
-                }
-
-                // create explanation containing parameters of the element
-                element.parameters = this.getParameters( element );
-
-                actionMap.set( element.name, element );
             }
+            element.parameters = this.getParameters( element );
         }
 
         // assign sequential index to elements, following all their branches recursively
@@ -509,54 +449,23 @@ class FlowParser {
         // sort elements by index so that table will be ordered by execution
         actionMap = new Map( [ ...actionMap.entries() ].sort( ( a, b ) => a[ 1 ].index - b[ 1 ].index ) );
 
-        // TODO:  generate explanation by associating outcomes with decisions/branches
-        let explanation = '';
-        for( const [ identifier, action ] of actionMap ) {
-            let elementType = action.type;
-            let parentBranch = action.parentBranch;
-            let parentBranchAction = '';
-            if( parentBranch != undefined ) {
-                parentBranchAction = ( parentBranch.type == 'decision' ? 'after checking' : '' )
-                                    + ( parentBranch.type == 'start' ? 'at the' : '' )
-                                    + ( parentBranch.type == 'loop' ? 'when loop has' : '' )
-                                    + ( parentBranch.type == 'actionCall' ? 'after calling action' : '' )
-                                    + ( parentBranch.type == 'wait' ? 'after event' : '' );
-            }
-            let conditionExplained = `${parentBranchAction ?? ''} ${action.conditionLabel ?? ''}`;
+        // extract the facts and render them in the shared voice (same one the
+        // start-node tooltip uses), then lint the graph for anti-patterns
+        const facts = FlowParserShared.extractFacts( actionMap );
+        const explanationLines = FlowParserShared.renderExplanation( facts );
+        const lintIssues = FlowParserShared.lintFlow( flowDefinition, actionMap );
 
-            if( elementType === 'recordCreate'
-                    || elementType === 'recordUpdate'
-                    || elementType === 'recordDelete'
-                    || elementType === 'recordRollback' ) {
-                let recordAction = elementType.replace( 'record', '' ).toLowerCase() + 's';
-                explanation += ` \n ${recordAction} ${action.object ?? action.inputReference} ${conditionExplained}`;
-            }
-            if( elementType === 'recordLookup' ) {
-                explanation += ` \n queries ${action.object} ${conditionExplained}`;
-            }
-            // if( elementType === 'assignment' ) {
-            //     explanation += ` \n assigns ${action.label} ${conditionExplained}`;
-            // }
-            if( elementType === 'actionCall' ) {
-                explanation += ` \n calls action ${action.label} ${conditionExplained}`;
-            }
-            if( elementType === 'screen' ) {
-                explanation += ` \n prompts screen ${action.label} ${conditionExplained}`;
-            }
-
-            if( elementType == 'transform' ) {
-                explanation += ` \n transforms ${ action.objectType ?? action.dataType }`;
-            }
-
-            // let parameters = action.parameters;
-        }
-        // console.log( explanation );
-
-        // display default explanation
+        // display default explanation (text nodes, so labels cannot inject HTML)
         dom.defaultExplainer.innerHTML = "";
-        let explanationHTML = document.createElement( 'span' );
-        explanationHTML.innerHTML = '<b>This flow:  </b>' + explanation.replaceAll( /\n/g, '<br />' );
-        dom.defaultExplainer.appendChild( explanationHTML );
+        let explanationHeader = document.createElement( 'b' );
+        explanationHeader.textContent = 'This flow:  ';
+        dom.defaultExplainer.appendChild( explanationHeader );
+        explanationLines.forEach( aLine => {
+            dom.defaultExplainer.appendChild( document.createElement( 'br' ) );
+            dom.defaultExplainer.appendChild( document.createTextNode( aLine ) );
+        } );
+
+        renderLintResults( lintIssues );
 
         // generate itemized description of the flow:  markdown for download/GPT,
         // and the same rows rendered as a DOM table
@@ -565,6 +474,14 @@ class FlowParser {
                             + '|Element name|Type|Parameters|Condition|Condition next element|\n'
                             + '|-|-|-|-|-|\n'
                             + this.getMDTableRows( tableRows );
+
+        // include the lint findings in the markdown so the download documents
+        // them and GPT can take them into account
+        if( lintIssues.length > 0 ) {
+            stepByStepMDTable += '\nPotential issues:\n'
+                + lintIssues.map( anIssue => `- (${ anIssue.severity }) ${ anIssue.message }` ).join( '\n' )
+                + '\n';
+        }
 
         createFlowTable( { flowName, flowDescription
                         , processType: flowDefinition.processType
@@ -658,7 +575,7 @@ class FlowParser {
             if( dom.gptQuestion && dom.gptQuestion.value ) {
                 prompt = dom.gptQuestion.value + '\\nFLOW: \\n';
             } else {
-                prompt = `This flow: ${explanation.replaceAll( /\n/g, '\\n' )} ` + CONFIG.PROMPTS.default;
+                prompt = `This flow: ${explanationLines.join( ' \\n ' )} ` + CONFIG.PROMPTS.default;
             }
 
             let gptModelSelection = document.querySelector( 'input[name="gpt-version"]:checked' ).value;
@@ -820,6 +737,25 @@ function createFlowTable( { flowName, flowDescription, processType, tableRows, a
     };
 
     // table and button are already in the document, no need to append
+}
+
+// shows the linter findings under the explanation; text nodes only
+function renderLintResults( lintIssues ) {
+    dom.lintResults.innerHTML = '';
+    if( ! lintIssues || lintIssues.length === 0 ) {
+        return;
+    }
+
+    let header = document.createElement( 'b' );
+    header.textContent = 'Potential issues:';
+    dom.lintResults.appendChild( header );
+
+    lintIssues.forEach( anIssue => {
+        let line = document.createElement( 'div' );
+        line.style.color = ( anIssue.severity === 'warning' ? 'darkred' : 'dimgray' );
+        line.textContent = ( anIssue.severity === 'warning' ? '⚠ ' : 'ℹ ' ) + anIssue.message;
+        dom.lintResults.appendChild( line );
+    } );
 }
 
 async function setKey() {

@@ -73,196 +73,280 @@ globalThis.FlowParserShared = ( function() {
         return aValue.replaceAll( /\<\/?.*?\>/g, '' );
     }
 
-    // walks the flow from the start element following connectors (branching
-    // through decision rules and loops) and returns plain-English descriptions
-    // of the relevant operations, used for the start-node summary tooltip
-    function describeFlow( flowDefinition, definitionMap ) {
+    // describes what a screen element displays and prompts for
+    function describeScreen( aScreen ) {
+        const fields = aScreen.fields ?? [];
+        const inputFields = fields.filter( aField => aField.fieldType !== "DisplayText" )
+                                    .map( aField => aField.fieldText ??
+                                                        aField.name ?? aField.extensionName )
+                                    .join( ", " );
+        const displayFields = fields.filter( aField => ( aField.fieldType == "ComponentInstance"
+                                                            || aField.fieldType == "DisplayText" )
+                                                        && aField.fieldText )
+                                    .map( aField => aField.fieldText ??
+                                                        aField.name ?? aField.extensionName )
+                                    .join( ", " );
+        return ( displayFields ? "displaying:  " + removeHTML( displayFields ) : "" )
+                + ( inputFields && displayFields ? " and " : "" )
+                + ( inputFields ? "prompting the user for these fields:  " + inputFields : "" );
+    }
 
-        // populate node map indexed by name
-        const nodeMap = new Map();
-        const screenMap = new Map();
-        const decisionMap = new Map();
-        definitionMap.forEach( ( value, key ) => {
-            value.forEach( aNode => {
-                // get the node that the current node is pointing to
-                let targetName = aNode.connector?.targetReference;
+    // builds a graph of all flow elements indexed by name, with a synthesized
+    // Start element and the branches flowing out of each element labeled in
+    // plain English; indexElements propagates the labels to downstream
+    // elements as their condition context.
+    // the graph holds shallow COPIES of the definition's elements:  the graph
+    // gains object cross-references (parentBranch cycles), and mutating the
+    // definition would make it unserializable for chrome.runtime.sendMessage
+    function buildElementGraph( flowDefinition ) {
+        const definitionMap = buildDefinitionMap( flowDefinition );
 
-                // handle next node pointers in decisions
-                // TODO:  implement for loops too
-                if( ! targetName && aNode.rules && aNode.rules.length > 0 ) {
-                    // branch to the first rule
-                    targetName = aNode.rules[ 0 ].connector?.targetReference;
-                }
-                if( ! targetName ) {
-                    targetName = aNode.defaultConnector?.targetReference;
-                }
-                const faultTargetName = aNode.faultConnector?.targetReference;
-                const newNode = {
-                    ...aNode
-                    , type:  key
-                    , targetName:  targetName
-                    , faultTargetName:  faultTargetName
-                    , visitCount: 0
-                };
-                nodeMap.set( aNode.name, newNode );
-
-                // create text for screen describing the inputs/outputs
-                if( key === 'screens' ) {
-                    const inputFields = aNode.fields.filter( aField => aField.fieldType !== "DisplayText" )
-                                                .map( aField => aField.fieldText ??
-                                                                    aField.name ?? aField.extensionName )
-                                                .join( ", " );
-                    const displayFields = aNode.fields.filter( aField => ( aField.fieldType == "ComponentInstance"
-                                                                            || aField.fieldType == "DisplayText" )
-                                                                        && aField.fieldText )
-                                                .map( aField => aField.fieldText ??
-                                                                    aField.name ?? aField.extensionName )
-                                                .join( ", " );
-                    const description = ( displayFields ? "displaying:  " + removeHTML( displayFields ) : "" )
-                                    + ( inputFields && displayFields ? " and " : "" )
-                                    + ( inputFields ? "prompting the user for these fields:  " + inputFields : "" );
-                    screenMap.set( aNode.name, description );
-                }
-
-                if( key === 'decisions' ) {
-                    // TODO:  describe individual branches
-                    const description = "checking these conditions:  "
-                                    + aNode.label + ' - ' + aNode.rules.map( aRule => aRule.label ).join( ", " );
-                    decisionMap.set( aNode.name, description );
-                }
-            } );
+        // synthesize the start element
+        let startTarget = flowDefinition.startElementReference
+                        ?? flowDefinition.start?.connector?.targetReference;
+        let firstElement = { ...( flowDefinition.start ?? { connector: { targetReference: startTarget } } ) };
+        firstElement.name = 'Start';
+        firstElement.type = 'start';
+        firstElement.branchArray = [];
+        firstElement.branchLabelArray = [];
+        if( firstElement.connector?.targetReference ) {
+            firstElement.branchArray.push( firstElement.connector.targetReference );
+            firstElement.branchLabelArray.push( firstElement.scheduledPaths?.length ?
+                                                'when triggered immediately' : '' );
+        }
+        firstElement.scheduledPaths?.forEach( s => {
+            firstElement.branchArray.push( s.connector?.targetReference );
+            firstElement.branchLabelArray.push( `on scheduled path ${ s.label }` );
         } );
 
-        // find a record create/update/delete and trace back to a decision or screen
-        let relevantTypesSet = new Set( [ 'recordCreates', 'recordUpdates', 'recordDeletes', 'actionCalls'
-                                , 'subflows', 'recordLookups' ] );
-        let descriptionArray = [];
+        const actionMap = new Map();
+        actionMap.set( firstElement.name, firstElement );
 
-        // follow the flow element sequence and create descriptions at relevant points
-        let startingElement = flowDefinition.startElementReference ??
-                                flowDefinition.start?.connector?.targetReference ??
-                                flowDefinition.start?.scheduledPaths?.[ 0 ]?.connector?.targetReference;
-        let currentNode = nodeMap.get( startingElement );
-        if( ! currentNode ) {
-            return descriptionArray;
+        for( const [ typeName, array ] of definitionMap ) {
+            for( const sourceElement of array ) {
+                const element = { ...sourceElement };
+
+                // singular type name, e.g. recordCreates -> recordCreate
+                element.type = typeName.substring( 0, typeName.length - 1 );
+
+                element.nextElement = element.connector?.targetReference
+                                    ?? element.defaultConnector?.targetReference;
+
+                // list the branches of execution
+                element.branchArray = [];
+                element.branchLabelArray = [];
+
+                if( element.type === 'decision' ) {
+                    // the default outcome exists even without a connector, so
+                    // downstream elements always inherit the decision context
+                    element.branchArray.push( element.defaultConnector?.targetReference );
+                    element.branchLabelArray.push( `after checking ${ element.label }: `
+                                        + ( element.defaultConnectorLabel ?? 'default outcome' ) );
+                } else if( element.nextElement != undefined ) {
+                    element.branchArray.push( element.nextElement );
+                    element.branchLabelArray.push( `after ${ element.label } succeeds` );
+                }
+
+                if( element.faultConnector?.targetReference ) {
+                    element.faultElement = element.faultConnector.targetReference;
+                    element.branchArray.push( element.faultElement );
+                    element.branchLabelArray.push( `if ${ element.label } fails` );
+                }
+
+                if( element.type === 'loop' ) {
+                    element.branchArray.push( element.nextValueConnector?.targetReference );
+                    element.branchLabelArray.push( `for each item in ${ element.label }` );
+                    element.branchArray.push( element.noMoreValuesConnector?.targetReference );
+                    element.branchLabelArray.push( `after ${ element.label } finishes iterating` );
+                }
+
+                if( element.type === 'wait' ) {
+                    element.waitEvents?.forEach( w => {
+                        element.branchArray.push( w.connector?.targetReference );
+                        element.branchLabelArray.push( `after event ${ w.label }` );
+                    } );
+                }
+
+                element.rules?.forEach( r => {
+                    element.branchArray.push( r.connector?.targetReference );
+                    element.branchLabelArray.push( `after checking ${ element.label }: ${ r.label }` );
+                } );
+
+                actionMap.set( element.name, element );
+            }
         }
-        let lastDecisionNode, lastDecisionNodeWithPendingBranches;
-        let lastScreenNode;
-        let nextNode = nodeMap.get( currentNode.targetName );
-        let visitedCountMap = new Map();
-        let nodesAlreadyDescribedSet = new Set();
-        while( nextNode || lastDecisionNodeWithPendingBranches ) {
-            // if there are no nodes left to visit, revisit the last decision that wasn't fully explored
-            if( ! nextNode ) {
-                nextNode = lastDecisionNodeWithPendingBranches;
-                // reset last screen that was from different context
-                lastScreenNode = null;
+
+        return { actionMap, firstElement };
+    }
+
+    // phrase describing what an element does, or null for elements that have
+    // no observable behavior worth narrating
+    function getActionText( element ) {
+        switch( element.type ) {
+            case 'recordCreate':   return `inserts ${ element.object ?? element.inputReference } record`;
+            case 'recordUpdate':   return `updates ${ element.object ?? element.inputReference } record`;
+            case 'recordDelete':   return `deletes ${ element.object ?? element.inputReference } record`;
+            case 'recordRollback': return 'rolls back the pending record changes';
+            case 'recordLookup':   return `queries ${ element.object } records`;
+            case 'actionCall':     return `calls action ${ element.actionName } (${ element.actionType })`;
+            case 'subflow':        return `calls flow ${ element.flowName ?? element.name }`;
+            case 'transform':      return `transforms ${ element.objectType ?? element.dataType }`;
+            case 'screen': {
+                const screenDescription = describeScreen( element );
+                return `prompts screen ${ element.label }`
+                        + ( screenDescription ? ', ' + screenDescription : '' );
             }
+        }
+        return null;
+    }
 
-            // check if non-decision node has already been visited
-            if( nextNode && nextNode.visitCount > 0
-                    && nextNode.type !== 'decisions' && nextNode.type !== 'loops' ) {
-                // node has already been visited, so we're in a loop and can exit
-                break;
+    // walks up the chain of branches an element inherited to detect whether
+    // it executes inside a loop body
+    function isInsideLoop( element ) {
+        const seen = new Set();
+        let current = element;
+        while( current && ! seen.has( current ) ) {
+            seen.add( current );
+            if( current.conditionLabel?.startsWith( 'for each item in' ) ) {
+                return true;
             }
+            current = current.parentBranch;
+        }
+        return false;
+    }
 
-            nextNode.visitCount ++;
-
-            // what will be the subsequent node to visit
-            let nextNodeName = nextNode.targetName;
-
-            // count how many times this decision node has been visited
-            // TODO:  implement for loops too
-            if( nextNode.type === 'decisions' ) {
-                // increase count to determine which of this decision's rule branch to visit next
-                let visitedCount = 0;
-                if( visitedCountMap.has( nextNode.name ) ) {
-                    visitedCount = visitedCountMap.get( nextNode.name ) + 1;
-                }
-                visitedCountMap.set( nextNode.name, visitedCount );
-
-                // get the next node from the rule that hasn't been visited yet
-                if( visitedCount === nextNode.rules.length ) {
-                    // all rules have been visited, proceed to the default branch
-                    nextNodeName = nextNode.defaultConnector?.targetReference;
-                    lastDecisionNodeWithPendingBranches = null;
-                } else {
-                    nextNodeName = nextNode.rules[ visitedCount ].connector?.targetReference;
-                    lastDecisionNodeWithPendingBranches = nextNode;
-                }
+    // extracts structured facts (what the flow does and under which branch)
+    // from a graph already indexed by indexElements, in execution order;
+    // consumed by the explanation renderer and available to the linter
+    function extractFacts( actionMap ) {
+        const facts = [];
+        const orderedElements = [ ...actionMap.values() ]
+                                    .filter( anElement => anElement.index )
+                                    .sort( ( a, b ) => a.index - b.index );
+        for( const element of orderedElements ) {
+            const actionText = getActionText( element );
+            if( ! actionText ) {
+                continue;
             }
+            facts.push( {
+                name: element.name
+                , label: element.label
+                , type: element.type
+                , actionText: actionText
+                , conditionLabel: ( ! element.conditionLabel || element.conditionLabel === 'start'
+                                        ? '' : element.conditionLabel )
+                , insideLoop: isInsideLoop( element )
+                , hasFaultPath: !! element.faultConnector?.targetReference
+            } );
+        }
+        return facts;
+    }
 
-            // count how many times this loop node has been visited
-            if( nextNode.type === 'loops' ) {
-                // increase count to determine which of this loop's branch to visit next
-                let visitedCount = 0;
-                if( visitedCountMap.has( nextNode.name ) ) {
-                    visitedCount = visitedCountMap.get( nextNode.name ) + 1;
-                }
-                visitedCountMap.set( nextNode.name, visitedCount );
+    // renders the facts as plain-English sentences:  the single voice used by
+    // the start-node tooltip, the popup explanation and the GPT prompt
+    function renderExplanation( facts ) {
+        return facts.map( aFact => aFact.actionText
+                            + ( aFact.conditionLabel ? ' ' + aFact.conditionLabel : '' ) );
+    }
 
-                // get the next node from the loop that hasn't been visited yet
-                if( visitedCount === 1 ) {
-                    // now that the main loop elements have been visited, proceed to the exit branch
-                    nextNodeName = nextNode.noMoreValuesConnector?.targetReference;
-                    lastDecisionNodeWithPendingBranches = null;
-                } else {
-                    nextNodeName = nextNode.nextValueConnector?.targetReference;
-                    lastDecisionNodeWithPendingBranches = nextNode;
-                }
+    // convenience:  graph + execution order + facts in one call
+    function getFlowOverview( flowDefinition ) {
+        const { actionMap, firstElement } = buildElementGraph( flowDefinition );
+        indexElements( actionMap, firstElement.name );
+        const facts = extractFacts( actionMap );
+        return { actionMap, firstElement, facts };
+    }
+
+    const DML_TYPES = new Set( [ 'recordCreate', 'recordUpdate', 'recordDelete' ] );
+    // canvas element types that participate in the connector graph
+    const CONNECTABLE_TYPES = new Set( [ 'recordLookup', 'recordCreate', 'recordUpdate'
+        , 'recordDelete', 'recordRollback', 'assignment', 'decision', 'screen', 'loop'
+        , 'step', 'subflow', 'actionCall', 'apexPluginCall', 'collectionProcessor'
+        , 'transform', 'wait' ] );
+    // 15 or 18 alphanumeric characters; combined with a digit check on the
+    // 3-character key prefix to limit false positives on ordinary words
+    const RECORD_ID_REGEX = /^[a-zA-Z0-9]{15}(?:[a-zA-Z0-9]{3})?$/;
+
+    function looksLikeRecordId( aString ) {
+        return RECORD_ID_REGEX.test( aString ) && /[0-9]/.test( aString.substring( 0, 3 ) );
+    }
+
+    // string literals an element compares against or assigns
+    function collectStringValues( element ) {
+        const strings = [];
+        const pushString = ( aValue ) => {
+            if( aValue?.stringValue ) {
+                strings.push( aValue.stringValue );
             }
+        };
+        pushString( element.value );
+        element.filters?.forEach( aFilter => pushString( aFilter.value ) );
+        element.inputAssignments?.forEach( anAssignment => pushString( anAssignment.value ) );
+        element.assignmentItems?.forEach( anItem => pushString( anItem.value ) );
+        element.inputParameters?.forEach( aParameter => pushString( aParameter.value ) );
+        element.rules?.forEach( aRule =>
+            aRule.conditions?.forEach( aCondition => pushString( aCondition.rightValue ) ) );
+        return strings;
+    }
 
-            if( currentNode.type === 'screens' ) {
-                lastScreenNode = currentNode;
-            }
-            if( currentNode.type === 'decisions' ) {
-                lastDecisionNode = currentNode;
-            }
+    // inspects the indexed graph for common flow anti-patterns
+    function lintFlow( flowDefinition, actionMap ) {
+        const issues = [];
 
-            // skip if node not relevant
-            if( ! relevantTypesSet.has( nextNode.type ) ) {
-                currentNode = nextNode;
-                nextNode = nodeMap.get( nextNodeName );
+        if( ! flowDefinition.description ) {
+            issues.push( { severity: 'info'
+                , message: 'The flow has no description.' } );
+        }
+
+        let undescribedCount = 0;
+        for( const [ name, element ] of actionMap ) {
+            if( element.type === 'start' ) {
                 continue;
             }
 
-            // avoid duplicate descriptions
-            if( nodesAlreadyDescribedSet.has( nextNode.name ) ) {
-                currentNode = nextNode;
-                nextNode = nodeMap.get( nextNodeName );
-                continue;
-            }
-            nodesAlreadyDescribedSet.add( nextNode.name );
+            const isDML = DML_TYPES.has( element.type );
+            const isDataOperation = isDML || element.type === 'recordLookup'
+                                    || element.type === 'actionCall';
 
-            // create a description from the pair of nodes
-            let recordAction = ( nextNode.type === 'recordCreates' ? 'inserts ' : '' )
-                                + ( nextNode.type === 'recordUpdates' ? 'updates ' : '' )
-                                + ( nextNode.type === 'recordDeletes' ? 'deletes ' : '' );
-            let targetOfAction = nextNode.object ?? nextNode.inputReference;
-            let description = ( recordAction ? recordAction + targetOfAction + ' record ' : '' )
-                            + ( nextNode.type === 'actionCalls' ? 'calls action '
-                                            + nextNode.actionName + " (" + nextNode.actionType + ") " : '' )
-                            + ( nextNode.type === 'subflows' ? 'calls flow '
-                                            + nextNode.name + " (" + nextNode.flowName + ") " : '' );
-            if( lastScreenNode ) {
-                description = description + "after " + screenMap.get( lastScreenNode.name );
-            }
-            if( lastDecisionNode ) {
-                let ruleIndex = visitedCountMap.get( lastDecisionNode.name );
-                ruleIndex = ruleIndex ?? 0;
-                ruleIndex = Math.min( ruleIndex, lastDecisionNode.rules.length - 1 );
-                let ruleLabel = lastDecisionNode.rules[ ruleIndex ].label;
-                description = description + ( lastScreenNode ? " and " : "" )
-                                + "after checking " + lastDecisionNode.label + ': ' + ruleLabel;
+            // DML, queries and callouts inside loops hit governor limits
+            if( isDataOperation && isInsideLoop( element ) ) {
+                issues.push( { severity: 'warning'
+                    , message: `${ name }: ${ element.type } runs inside a loop`
+                        + ' — consider collecting records and operating on them after the loop.' } );
             }
 
-            descriptionArray.push( description );
+            // DML and actions without a fault path abort the flow on error
+            if( ( isDML || element.type === 'actionCall' )
+                    && ! element.faultConnector?.targetReference ) {
+                issues.push( { severity: 'info'
+                    , message: `${ name }: no fault path — an error here stops the flow with an unhandled fault.` } );
+            }
 
-            currentNode = nextNode;
-            nextNode = nodeMap.get( nextNodeName );
+            // canvas elements no path reaches
+            if( ! element.index && CONNECTABLE_TYPES.has( element.type ) ) {
+                issues.push( { severity: 'warning'
+                    , message: `${ name }: unreachable — no path from Start leads to this element.` } );
+            }
+
+            // hardcoded record ids break across orgs and sandboxes
+            collectStringValues( element ).forEach( aString => {
+                if( looksLikeRecordId( aString ) ) {
+                    issues.push( { severity: 'warning'
+                        , message: `${ name }: hardcoded record id "${ aString }" — ids differ between orgs and sandboxes.` } );
+                }
+            } );
+
+            if( ! element.description && CONNECTABLE_TYPES.has( element.type ) ) {
+                undescribedCount++;
+            }
         }
 
-        return descriptionArray;
+        if( undescribedCount > 0 ) {
+            issues.push( { severity: 'info'
+                , message: `${ undescribedCount } element(s) have no description.` } );
+        }
+
+        return issues;
     }
 
     // assigns a sequential execution index to every element reachable from the
@@ -326,7 +410,12 @@ globalThis.FlowParserShared = ( function() {
         , buildDefinitionMap
         , findElementByLabel
         , removeHTML
-        , describeFlow
+        , describeScreen
+        , buildElementGraph
+        , extractFacts
+        , renderExplanation
+        , getFlowOverview
+        , lintFlow
         , indexElements
     };
 } )();
