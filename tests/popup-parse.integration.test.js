@@ -16,14 +16,21 @@ describe('popup parse integration', () => {
       <span id="error"></span>
       <div id="spinner"></div>
       <span id="response"></span>
-      <label for="openAIKey"></label>
-      <input id="openAIKey" type="password" />
-      <button id="setKey"></button>
+      <div id="providerSelection">
+        <input type="radio" name="ai-provider" value="openai" checked>
+        <input type="radio" name="ai-provider" value="anthropic">
+        <input type="radio" name="ai-provider" value="gemini">
+        <input type="radio" name="ai-provider" value="ollama">
+      </div>
+      <div id="apiKeyRow">
+        <label id="apiKeyLabel" for="openAIKey"></label>
+        <input id="openAIKey" type="password" />
+        <button id="setKey"></button>
+      </div>
+      <div id="ollamaHint" style="display:none;"></div>
       <div id="gptModelSelection" style="display:none;">
-        <div class="custom-model-input" style="display:none;">
-          <input type="text" id="custom-model-name" />
-        </div>
-        <input type="radio" name="gpt-version" value="gpt-4o" checked>
+        <select id="modelSelect"></select>
+        <input type="text" id="custom-model-name" style="display:none;" />
       </div>
       <button id="downloadButton" style="display:none;"></button>
       <div id="flowTableContainer" style="display:none;"></div>
@@ -44,6 +51,7 @@ describe('popup parse integration', () => {
     };
 
     require('../scripts/flowParser.js');
+    require('../scripts/aiProviders.js');
     require('../scripts/popup.js');
   });
 

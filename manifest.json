@@ -46,10 +46,20 @@
     }
     , "permissions": [
                 "cookies",
-                "storage"
+                "storage",
+                "declarativeNetRequestWithHostAccess"
     ]
+
+    , "declarative_net_request": {
+      "rule_resources": [ {
+        "id": "ollama_origin",
+        "enabled": true,
+        "path": "rules.json"
+      } ]
+    }
   
     , "host_permissions": [
+      "http://localhost:11434/*",
       "https://*.salesforce.com/*",
       "https://*.salesforce-setup.com/*",
       "https://*.visual.force.com/*",

@@ -2,3 +2,6 @@ sampleFlow.json
 *.txt
 .sfdx
 cert/*.*
+
+# Chrome-generated artifacts for unpacked extensions (compiled DNR rulesets)
+_metadata/

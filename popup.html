@@ -30,39 +30,46 @@
 
         <div id="rightPanel">
             <div id="gpt" >
-                <label for="openAIKey" >OpenAI Key</label>
-                <input id="openAIKey" type="password" name="openAIKey" />
-                &nbsp;&nbsp;
-                <button id="setKey" >Set OpenAI key</button>
-                
+                <div id="providerSelection" class="model-selection-inline">
+                    <span class="model-selection-label">AI Provider:</span>
+                    <div class="model-options-inline">
+                        <label class="model-option-compact">
+                            <input type="radio" name="ai-provider" value="openai" checked>
+                            <span class="model-name-compact">OpenAI</span>
+                        </label>
+                        <label class="model-option-compact">
+                            <input type="radio" name="ai-provider" value="anthropic">
+                            <span class="model-name-compact">Anthropic</span>
+                        </label>
+                        <label class="model-option-compact">
+                            <input type="radio" name="ai-provider" value="gemini">
+                            <span class="model-name-compact">Gemini</span>
+                        </label>
+                        <label class="model-option-compact">
+                            <input type="radio" name="ai-provider" value="ollama">
+                            <span class="model-name-compact">Ollama (local)</span>
+                        </label>
+                    </div>
+                </div>
+
+                <div id="apiKeyRow">
+                    <label for="openAIKey" id="apiKeyLabel">OpenAI API Key</label>
+                    <input id="openAIKey" type="password" name="openAIKey" />
+                    &nbsp;&nbsp;
+                    <button id="setKey" >Set key</button>
+                </div>
+                <div id="ollamaHint" style="display: none;">
+                    Ollama runs locally at http://localhost:11434 — no API key needed.
+                    If requests fail with 403, start Ollama with
+                    OLLAMA_ORIGINS=chrome-extension://* and try again.
+                </div>
+
                 <div id="gptModelSelection" class="model-selection" style="display: none;">
                     <div class="model-selection-inline">
                         <span class="model-selection-label">AI Model:</span>
-                        <div class="model-options-inline">
-                            <label class="model-option-compact">
-                                <input type="radio" name="gpt-version" value="gpt-4o" checked>
-                                <span class="model-name-compact">GPT-4o</span>
-                            </label>
-                            <label class="model-option-compact">
-                                <input type="radio" name="gpt-version" value="gpt-4.1">
-                                <span class="model-name-compact">GPT-4.1</span>
-                            </label>
-                            <label class="model-option-compact">
-                                <input type="radio" name="gpt-version" value="gpt-5-nano">
-                                <span class="model-name-compact">GPT-5 Nano</span>
-                            </label>
-                            <label class="model-option-compact">
-                                <input type="radio" name="gpt-version" value="gpt-5-mini">
-                                <span class="model-name-compact">GPT-5 Mini</span>
-                            </label>
-                            <label class="model-option-compact">
-                                <input type="radio" name="gpt-version" value="custom">
-                                <span class="model-name-compact">Custom</span>
-                            </label>
-                        </div>
-                    </div>
-                    <div class="custom-model-input" style="display: none;">
-                        <input type="text" id="custom-model-name" placeholder="e.g., gpt-4-turbo, gpt-5-mini" />
+                        <select id="modelSelect"></select>
+                        <input type="text" id="custom-model-name" style="display: none;"
+                               placeholder="custom model name" />
                     </div>
                 </div>
             </div>
@@ -73,6 +80,7 @@
         <div id="flowTableContainer" style="display: none;"></div>
     </div>
     <script src="./scripts/flowParser.js"></script>
+    <script src="./scripts/aiProviders.js"></script>
     <script src="./scripts/popup.js"></script>
 </body>
 </html>

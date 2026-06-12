@@ -1,52 +1,40 @@
 // Configuration Constants
 const CONFIG = {
     // Storage and caching
-    // the OpenAI key is stored locally and unencrypted (an extension has no way
-    // to keep a real secret client-side); the name says exactly that
-    STORAGE_KEY: 'openAIKey',
-    // older versions kept the key in localStorage as TextEncoder bytes
-    LEGACY_STORAGE_KEY: 'hashedKey',
+    // API keys are stored locally and unencrypted (an extension has no way to
+    // keep a real secret client-side), one entry per provider
+    PROVIDER_KEYS_STORAGE: 'aiProviderKeys',
+    // older versions kept a single OpenAI key under these names
+    LEGACY_OPENAI_STORAGE_KEY: 'openAIKey',
+    LEGACY_LOCALSTORAGE_KEY: 'hashedKey',
     CACHE_DURATION: 300000, // 5 minutes in milliseconds
-    
-    // GPT API Configuration
+
+    // request parameters (provider-specific shapes live in aiProviders.js)
     GPT_PARAMS: {
-        temperature: 0.3,
-        top_p: 0.2,
-        max_tokens: 2000,
-        gpt5_max_tokens: 5000,
-        frequency_penalty: 0,
-        presence_penalty: 0,
-        default_model: 'gpt-5-nano'
+        temperature: 0.3
     },
-    
-    // Data size limits for model selection
+
+    // Data size limits
     DATA_LIMITS: {
-        model_upgrade_threshold: 16200,    // chars - upgrade from gpt-5-nano to gpt-4o
+        model_upgrade_threshold: 16200,    // chars - upgrade from gpt-5-nano to a larger model
         truncation_threshold: 130872,      // chars - hard limit for any model
         cache_key_substring_length: 20     // chars - for cache key generation
     },
-    
-    // API endpoints
-    ENDPOINTS: {
-        gpt5: "https://api.openai.com/v1/responses",
-        standard: "https://api.openai.com/v1/chat/completions"
-    },
-    
+
     // System prompts and messages
     PROMPTS: {
         default: `Your purpose is to help everyone quickly understand what this Salesforce flow does and how. Let us think step-by-step and briefly summarize the flow in the format: \\npurpose of the flow, the main objects queried/inserted/updated, dependencies (labels, hard-coded ids, values, emails, names, etc) from outside the flow, the main conditions it evaluates, and any potential or evident issues.\\nFLOW: \\n`,
         system: 'You are an expert at troubleshooting and explaining Salesforce flows.',
-        no_response: 'No response content received from GPT-5 model',
-        response_truncated: ' (RESPONSE TRUNCATED DUE TO LIMIT)'
+        no_response: 'No response content received from the model'
     },
-    
+
     // Error messages
     ERRORS: {
-        no_key: "Please set an OpenAI key to get an AI explanation.",
+        no_key: "Please set an API key for the selected AI provider to get an AI explanation.",
         no_data_received: 'No data received from current page.',
         no_data_to_send: 'No data to send.'
     },
-    
+
     // Flow element types and values
     FLOW: {
         element_types: {
@@ -55,32 +43,13 @@ const CONFIG = {
         parameter_separator: ' / ',
         parameter_separator_length: 2
     },
-    
-    // Model configurations
-    MODELS: {
-        supported: ['gpt-4o', 'gpt-4.1', 'gpt-5-nano', 'gpt-5-mini'],
-        gpt5_temperature: 1  // GPT-5 models only support temperature = 1
-    },
-    
+
     // Hash function constants
     HASH: {
         shift_amount: 5,
         initial_value: 0
-    },
-    
-    // DOM and formatting
-    UI: {
-        gpt5_response_path: {
-            output_index: 1,
-            content_index: 0
-        },
-        gpt4_response_path: {
-            choice_index: 0
-        }
     }
 };
-
-// All constants are now centralized in CONFIG object above
 
 const dom = {
     setKeyButton: document.getElementById('setKey'),
@@ -92,13 +61,111 @@ const dom = {
     gptDialogContainer: document.getElementById('gptDialogContainer'),
     gptButton: document.getElementById('gptButton'),
     gptModelSelection: document.getElementById('gptModelSelection'),
+    modelSelect: document.getElementById('modelSelect'),
     customModelName: document.getElementById('custom-model-name'),
-    customModelInput: document.querySelector('.custom-model-input'),
+    providerSelection: document.getElementById('providerSelection'),
+    apiKeyRow: document.getElementById('apiKeyRow'),
+    apiKeyLabel: document.getElementById('apiKeyLabel'),
+    ollamaHint: document.getElementById('ollamaHint'),
     gptQuestion: document.getElementById('gptQuestion'),
     flowTableContainer: document.getElementById('flowTableContainer'),
     downloadButton: document.getElementById('downloadButton'),
     openAIKeyInput: document.querySelector('input#openAIKey')
 };
+
+// ---- AI provider / model selection ----
+const PROVIDER_PREF = 'selectedAIProvider';
+const MODEL_PREF_PREFIX = 'selectedModel:';
+const LEGACY_MODEL_PREF = 'selectedGPTModel';
+const CUSTOM_MODEL_OPTION = 'custom';
+
+function getSelectedProvider() {
+    const saved = localStorage.getItem( PROVIDER_PREF );
+    return AIProviders.PROVIDERS[ saved ] ? saved : 'openai';
+}
+
+function getSavedModel( provider ) {
+    let saved = localStorage.getItem( MODEL_PREF_PREFIX + provider );
+    // migrate the preference saved before multi-provider support
+    if( ! saved && provider === 'openai' ) {
+        saved = localStorage.getItem( LEGACY_MODEL_PREF );
+    }
+    return saved || AIProviders.PROVIDERS[ provider ].defaultModel;
+}
+
+// the model to call right now:  the dropdown value, or the custom name
+function getSelectedModel( provider ) {
+    if( dom.modelSelect.value === CUSTOM_MODEL_OPTION ) {
+        return dom.customModelName.value.trim()
+                || AIProviders.PROVIDERS[ provider ].defaultModel;
+    }
+    return dom.modelSelect.value || AIProviders.PROVIDERS[ provider ].defaultModel;
+}
+
+function populateModelSelect( provider ) {
+    const providerDef = AIProviders.PROVIDERS[ provider ];
+    dom.modelSelect.innerHTML = '';
+    providerDef.models.forEach( aModel => {
+        const option = document.createElement( 'option' );
+        option.value = aModel;
+        option.textContent = aModel;
+        dom.modelSelect.appendChild( option );
+    } );
+    const customOption = document.createElement( 'option' );
+    customOption.value = CUSTOM_MODEL_OPTION;
+    customOption.textContent = 'Custom…';
+    dom.modelSelect.appendChild( customOption );
+
+    const saved = getSavedModel( provider );
+    if( providerDef.models.includes( saved ) ) {
+        dom.modelSelect.value = saved;
+        dom.customModelName.style.display = 'none';
+    } else {
+        // a saved model outside the list is a custom model name
+        dom.modelSelect.value = CUSTOM_MODEL_OPTION;
+        dom.customModelName.value = ( saved === CUSTOM_MODEL_OPTION ? '' : saved );
+        dom.customModelName.style.display = 'inline-block';
+    }
+}
+
+function applyProviderSelection( provider ) {
+    const providerDef = AIProviders.PROVIDERS[ provider ];
+    const radio = dom.providerSelection.querySelector( `input[value="${ provider }"]` );
+    if( radio ) {
+        radio.checked = true;
+    }
+    dom.apiKeyRow.style.display = ( providerDef.requiresKey ? 'block' : 'none' );
+    dom.ollamaHint.style.display = ( providerDef.requiresKey ? 'none' : 'block' );
+    dom.apiKeyLabel.textContent = providerDef.label + ' API Key';
+    populateModelSelect( provider );
+}
+
+// selection events, wired once at load (handler properties, no stacking)
+dom.providerSelection.onchange = ( e ) => {
+    if( e.target.name === 'ai-provider' ) {
+        localStorage.setItem( PROVIDER_PREF, e.target.value );
+        applyProviderSelection( e.target.value );
+    }
+};
+
+dom.modelSelect.onchange = () => {
+    if( dom.modelSelect.value === CUSTOM_MODEL_OPTION ) {
+        dom.customModelName.style.display = 'inline-block';
+        dom.customModelName.focus();
+    } else {
+        dom.customModelName.style.display = 'none';
+        localStorage.setItem( MODEL_PREF_PREFIX + getSelectedProvider(), dom.modelSelect.value );
+    }
+};
+
+dom.customModelName.oninput = () => {
+    if( dom.modelSelect.value === CUSTOM_MODEL_OPTION && dom.customModelName.value.trim() ) {
+        localStorage.setItem( MODEL_PREF_PREFIX + getSelectedProvider()
+                            , dom.customModelName.value.trim() );
+    }
+};
+
+applyProviderSelection( getSelectedProvider() );
 
 class FlowParser {
     parseValue( rightValue ) {
@@ -493,82 +560,37 @@ class FlowParser {
         // prepare to call OpenAI
         dom.response.innerText = '';
 
-        let storedKey = await getStoredKey();
-        if( ! storedKey ) {
+        const provider = getSelectedProvider();
+        const apiKey = await getStoredKey( provider );
+        if( AIProviders.PROVIDERS[ provider ].requiresKey && ! apiKey ) {
             dom.spinner.style.display = "none";
             dom.response.innerText = '';
             dom.error.innerText = CONFIG.ERRORS.no_key;
             return;
         }
 
-    // since we have OpenAI key, show the dialog container
-    let gptDialogContainer = document.getElementById( 'gptDialogContainer' );
-    gptDialogContainer.style.display = 'block';
-    let gptButton = document.getElementById( 'gptButton' );
-    // Load saved model preference or default to gpt-4o
-    let savedModel = localStorage.getItem('selectedGPTModel') || CONFIG.MODELS.supported[0];
-    
-    let gptSelection = document.getElementById( 'gptModelSelection' );
-    gptSelection.style.display = 'block';
-    
-    // Update radio button selection based on saved model
-    let radioButtons = gptSelection.querySelectorAll('input[name="gpt-version"]');
-    let customInput = document.getElementById('custom-model-name');
-    let customModelInput = gptSelection.querySelector('.custom-model-input');
-    
-    radioButtons.forEach(radio => {
-        if (radio.value === savedModel) {
-            radio.checked = true;
-        } else if (radio.value === 'custom' && savedModel && !CONFIG.MODELS.supported.includes(savedModel)) {
-            radio.checked = true;
-            customModelInput.style.display = 'block';
-            customInput.value = savedModel;
-        }
-    });
-    
-    // Add event handlers to save model preference and handle custom input
-    // (assigned as properties, not addEventListener, so that re-running parseFlow
-    // replaces the handlers instead of stacking duplicates)
-    gptSelection.onchange = (e) => {
-        if (e.target.name === 'gpt-version') {
-            const customModelInput = gptSelection.querySelector('.custom-model-input');
-            const customModelName = gptSelection.querySelector('#custom-model-name');
-            
-            if (e.target.value === 'custom') {
-                customModelInput.style.display = 'block';
-                customModelName.focus();
-            } else {
-                customModelInput.style.display = 'none';
-                localStorage.setItem('selectedGPTModel', e.target.value);
-            }
-        }
-    };
+        // the selected provider is usable, show the ask-AI dialog
+        dom.gptDialogContainer.style.display = 'block';
+        dom.gptModelSelection.style.display = 'block';
 
-    // Handle custom model name input
-    gptSelection.oninput = (e) => {
-        if (e.target.id === 'custom-model-name') {
-            const customRadios = gptSelection.querySelectorAll('input[value="custom"]');
-            const customRadio = customRadios[0];
-            if (customRadio && customRadio.checked && e.target.value.trim()) {
-                localStorage.setItem('selectedGPTModel', e.target.value.trim());
-            }
-        }
-    };
-
-    // Model selection is already in the HTML, no need to append
-
-    // make button call GPT
-    // (handler property so the latest flow's data replaces any previous handler)
-    gptButton.onclick = () => {
-
+        // make button call the selected AI provider
+        // (handler property so the latest flow's data replaces any previous handler)
+        dom.gptButton.onclick = async () => {
             dom.spinner.style.display = "inline-block";
+            dom.error.innerText = '';
 
-            let openAIKey = storedKey;
-            if( ! openAIKey ) {
+            // re-read the selection at click time, it may have changed
+            const provider = getSelectedProvider();
+            const model = getSelectedModel( provider );
+            const apiKey = await getStoredKey( provider );
+            if( AIProviders.PROVIDERS[ provider ].requiresKey && ! apiKey ) {
+                dom.spinner.style.display = "none";
+                dom.error.innerText = CONFIG.ERRORS.no_key;
                 return;
             }
 
-            dom.response.innerText = 'Asking GPT to explain current flow...';
+            dom.response.innerText = 'Asking ' + AIProviders.PROVIDERS[ provider ].label
+                                    + ' to explain current flow...';
 
             // accept user question, otherwise use default prompt
             let prompt;
@@ -578,24 +600,14 @@ class FlowParser {
                 prompt = `This flow: ${explanationLines.join( ' \\n ' )} ` + CONFIG.PROMPTS.default;
             }
 
-            let gptModelSelection = document.querySelector( 'input[name="gpt-version"]:checked' ).value;
-            let gptModel = gptModelSelection;
-
-            // If custom model is selected, get the actual model name from the input field
-            if (gptModelSelection === 'custom') {
-                const customModelName = dom.customModelName.value.trim();
-                gptModel = customModelName || 'gpt-4o'; // fallback to gpt-4o if empty
-            }
-
-        let dataObject = { 
-            currentURL: window.location.href, 
-            resultData: stepByStepMDTable, 
-            // resultData: csvFlow,
-            prompt: prompt,
-            gptModel: gptModel
+            sendToAI( {
+                currentURL: window.location.href
+                , resultData: stepByStepMDTable
+                , prompt: prompt
+                , provider: provider
+                , model: model
+            }, apiKey );
         };
-        sendToGPT( dataObject, openAIKey );
-    };
     }
 }
 
@@ -761,28 +773,52 @@ function renderLintResults( lintIssues ) {
 async function setKey() {
     dom.error.innerText = "";
 
-    await chrome.storage.local.set( { [ CONFIG.STORAGE_KEY ]: dom.openAIKeyInput.value } );
-    dom.error.innerText = "Key saved locally (unencrypted, in this browser profile only). "
+    const provider = getSelectedProvider();
+    const keys = await getProviderKeys();
+    keys[ provider ] = dom.openAIKeyInput.value;
+    await chrome.storage.local.set( { [ CONFIG.PROVIDER_KEYS_STORAGE ]: keys } );
+    dom.error.innerText = AIProviders.PROVIDERS[ provider ].label
+                        + " key saved locally (unencrypted, in this browser profile only). "
                         + "An AI explanation should appear here the next time you open this page.";
 }
 
-async function getStoredKey() {
-    let stored = await chrome.storage.local.get( CONFIG.STORAGE_KEY );
-    let key = stored[ CONFIG.STORAGE_KEY ];
+// keys are stored per provider:  { openai: '...', anthropic: '...', ... }
+async function getProviderKeys() {
+    let stored = await chrome.storage.local.get( CONFIG.PROVIDER_KEYS_STORAGE );
+    let keys = stored[ CONFIG.PROVIDER_KEYS_STORAGE ] ?? {};
+
+    // migrate the single OpenAI key saved by older versions
+    if( ! keys.openai ) {
+        const legacyKey = await getLegacyOpenAIKey();
+        if( legacyKey ) {
+            keys.openai = legacyKey;
+            await chrome.storage.local.set( { [ CONFIG.PROVIDER_KEYS_STORAGE ]: keys } );
+        }
+    }
+    return keys;
+}
+
+async function getStoredKey( provider ) {
+    const keys = await getProviderKeys();
+    return keys[ provider ] ?? null;
+}
+
+async function getLegacyOpenAIKey() {
+    let stored = await chrome.storage.local.get( CONFIG.LEGACY_OPENAI_STORAGE_KEY );
+    let key = stored[ CONFIG.LEGACY_OPENAI_STORAGE_KEY ];
     if( key ) {
         return key;
     }
 
-    // migrate a key saved by older versions in localStorage as encoded bytes
-    let legacyKey = localStorage.getItem( CONFIG.LEGACY_STORAGE_KEY );
+    // even older versions kept the key in localStorage as TextEncoder bytes
+    let legacyKey = localStorage.getItem( CONFIG.LEGACY_LOCALSTORAGE_KEY );
     if( ! legacyKey ) {
         return null;
     }
     let encodedKey = JSON.parse( legacyKey );
     let intArray = new Uint8Array( Object.values( encodedKey ) );
     key = new TextDecoder().decode( intArray );
-    await chrome.storage.local.set( { [ CONFIG.STORAGE_KEY ]: key } );
-    localStorage.removeItem( CONFIG.LEGACY_STORAGE_KEY );
+    localStorage.removeItem( CONFIG.LEGACY_LOCALSTORAGE_KEY );
     return key;
 }
 
@@ -796,20 +832,20 @@ function verySimpleHash( data ) {
     return hash;
 }
 
-function sendToGPT( dataObject, openAIKey ) {
-    // const errorSpan = document.getElementById( "error" );
+
+// streams an explanation of the flow from the selected AI provider,
+// updating the response area as text arrives
+async function sendToAI( dataObject, apiKey ) {
     try {
         if( ! dataObject ) {
             dom.response.innerText = CONFIG.ERRORS.no_data_received;
-            dom.spinner.style.display = "none";
             return;
         }
 
-        let { currentURL, resultData, prompt, gptModel } = dataObject;
+        let { currentURL, resultData, prompt, provider, model } = dataObject;
 
         if( ! resultData ) {
             dom.response.innerText = CONFIG.ERRORS.no_data_to_send;
-            dom.spinner.style.display = "none";
             return;
         }
 
@@ -825,8 +861,9 @@ function sendToGPT( dataObject, openAIKey ) {
         } );
 
         // attempt to retrieve previously stored response
-        // (same key is used to store the response after the fetch below)
-        const cacheKey = verySimpleHash( currentURL + prompt + resultData.substring( 0, CONFIG.DATA_LIMITS.cache_key_substring_length ) );
+        // (same key is used to store the response after the request below)
+        const cacheKey = verySimpleHash( currentURL + provider + model + prompt
+                    + resultData.substring( 0, CONFIG.DATA_LIMITS.cache_key_substring_length ) );
         const cachedResponse = sessionStorage.getItem( cacheKey );
         if( cachedResponse != null && cachedResponse != undefined ) {
             let parsedCachedResponse = JSON.parse( cachedResponse );
@@ -834,166 +871,64 @@ function sendToGPT( dataObject, openAIKey ) {
             // only use cached response if newer than cache limit
             let cacheAgeMs = Math.abs( Date.now() - parsedCachedResponse?.cachedDate );
             if( cacheAgeMs < CONFIG.CACHE_DURATION ) {
-                // display response 
-                dom.response.innerText = 'OpenAI (cached response): ' + parsedCachedResponse.parsedResponse;
-                dom.spinner.style.display = "none";
+                dom.response.innerText = 'Cached response: ' + parsedCachedResponse.parsedResponse;
+                convertResponseFromMarkdown();
                 return;
             }
         }
 
-        // use parameters recommended for Code Comment Generation
-        let temperature = CONFIG.GPT_PARAMS.temperature;
-        let top_p = CONFIG.GPT_PARAMS.top_p;
-        let max_tokens = CONFIG.GPT_PARAMS.max_tokens;
-        let frequency_penalty = CONFIG.GPT_PARAMS.frequency_penalty;
-        let presence_penalty = CONFIG.GPT_PARAMS.presence_penalty;
-        let model = ( gptModel ? gptModel : CONFIG.GPT_PARAMS.default_model );
-        let systemPrompt = CONFIG.PROMPTS.system;
-
-        // normalize whitespace to save tokens; JSON.stringify below handles escaping,
-        // so quotes/backslashes/newlines in the flow data are passed through intact
+        // normalize whitespace to save tokens; JSON.stringify in the provider
+        // layer handles escaping
         let data = resultData.replaceAll( '\t', ' ' ).replaceAll( '   ', ' ' );
 
-        // check size of data and select a bigger model as needed
-        let originalModel = model;
-        let modelUpgraded = false;
-        
-        if( data.length > CONFIG.DATA_LIMITS.model_upgrade_threshold ) {
-            // Only upgrade to gpt-4o if user selected gpt-5-nano but data is too large
-            if( model === 'gpt-5-nano' ) {
-                model = 'gpt-4o';
-                modelUpgraded = true;
-                console.log(`Data size (${data.length} chars) requires upgrade from ${originalModel} to ${model}`);
-            }
-            
-            // truncate data as needed for any model
-            if( data.length > CONFIG.DATA_LIMITS.truncation_threshold ) {
-                data = data.substring( 0, CONFIG.DATA_LIMITS.truncation_threshold );
-                console.log('Data truncated to fit model context window');
-            }
+        // upgrade the smallest OpenAI model when the flow is large
+        if( provider === 'openai' && model === 'gpt-5-nano'
+                && data.length > CONFIG.DATA_LIMITS.model_upgrade_threshold ) {
+            model = 'gpt-5-mini';
+            console.log( `Data size (${ data.length } chars) requires upgrade to ${ model }` );
         }
-        
-        // Update status message to show model being used
-        let statusMessage = modelUpgraded ? 
-            `Using ${model} (auto-upgraded from ${originalModel} due to data size)...` :
-            `Using ${model}...`;
-        dom.response.innerText = statusMessage;
-
-        // Determine if model is GPT-5 and adjust parameters accordingly
-        let isMoreRecentModel = model.toLowerCase().startsWith('gpt-5')
-                    || model.toLowerCase().includes('o4-mini');
-        let tokenLimitParam = isMoreRecentModel ? 'max_output_tokens' : 'max_tokens';
-        let modelTemperature = isMoreRecentModel ? CONFIG.MODELS.gpt5_temperature : temperature; // GPT-5 models only support temperature = 1
-        
-        // Build different payload structures for GPT-5 vs other models
-        let payloadParams;
-        let url;
-        
-        if (isMoreRecentModel) {
-            // GPT-5 uses different endpoint and payload structure
-            url = CONFIG.ENDPOINTS.gpt5;
-            max_tokens = CONFIG.GPT_PARAMS.gpt5_max_tokens;
-            let fullInput = `${systemPrompt}\n\n${prompt} ${data}`;
-            payloadParams = {
-                model: model,
-                input: fullInput,
-                temperature: modelTemperature,
-                [tokenLimitParam]: max_tokens
-            };
-        } else {
-            // Standard chat completions for other models
-            url = CONFIG.ENDPOINTS.standard;
-            payloadParams = {
-                model: model,
-                messages: [
-                    { role: "system", content: [ { type: "text", text: systemPrompt } ] },
-                    { role: "user", content: [ { type: "text", text: `${prompt} ${data}` } ] }
-                ],
-                temperature: modelTemperature,
-                [tokenLimitParam]: max_tokens,
-                top_p: top_p,
-                frequency_penalty: frequency_penalty,
-                presence_penalty: presence_penalty
-            };
+        if( data.length > CONFIG.DATA_LIMITS.truncation_threshold ) {
+            data = data.substring( 0, CONFIG.DATA_LIMITS.truncation_threshold );
+            console.log( 'Data truncated to fit model context window' );
         }
-        
-        let payload = JSON.stringify(payloadParams);
 
-        console.log( payload );
+        dom.response.innerText = `Using ${ model } (${ AIProviders.PROVIDERS[ provider ].label })...`;
 
-        // prepare and send request
-        fetch(url, {
-            method: "POST",
-            headers: {
-                "Content-Type": "application/json",
-                "Authorization": "Bearer " + openAIKey
-            },
-            body: payload
-        })
-        .then(response => response.text())
-        .then(open_ai_response => {
-
-            let parsedResponse = JSON.parse( open_ai_response );
-            console.log( parsedResponse );
-
-            if( parsedResponse.error ) {
-                parsedResponse = parsedResponse.error.message + ` (${parsedResponse.error.type})`;
-            } else if (isMoreRecentModel) {
-                // Check finish reason for GPT-5 with proper guard clauses
-                let responseText = null;
-                
-                // Safely navigate the response structure
-                if (parsedResponse.output && 
-                    Array.isArray(parsedResponse.output) && 
-                    parsedResponse.output[CONFIG.UI.gpt5_response_path.output_index] && 
-                    parsedResponse.output[CONFIG.UI.gpt5_response_path.output_index].content && 
-                    Array.isArray(parsedResponse.output[CONFIG.UI.gpt5_response_path.output_index].content) && 
-                    parsedResponse.output[CONFIG.UI.gpt5_response_path.output_index].content[CONFIG.UI.gpt5_response_path.content_index] && 
-                    parsedResponse.output[CONFIG.UI.gpt5_response_path.output_index].content[CONFIG.UI.gpt5_response_path.content_index].text) {
-                    responseText = parsedResponse.output[CONFIG.UI.gpt5_response_path.output_index].content[CONFIG.UI.gpt5_response_path.content_index].text;
+        // stream the response, replacing the status message on the first delta
+        let firstDelta = true;
+        const fullText = await AIProviders.streamChat( {
+            provider: provider
+            , model: model
+            , apiKey: apiKey
+            , systemPrompt: CONFIG.PROMPTS.system
+            , userText: `${ prompt } ${ data }`
+            , temperature: CONFIG.GPT_PARAMS.temperature
+            , onDelta: ( delta, textSoFar ) => {
+                if( firstDelta ) {
+                    firstDelta = false;
+                    dom.spinner.style.display = "none";
                 }
-                
-                console.log(responseText);
-                
-                if (!responseText) {
-                    responseText = CONFIG.PROMPTS.no_response;
-                } else {
-                    // Check for truncation only if we have valid response text
-                    if (parsedResponse.status === 'incomplete' && parsedResponse.incomplete_details?.reason === 'max_output_tokens') {
-                        responseText += CONFIG.PROMPTS.response_truncated;
-                    }
-                }
-                
-                parsedResponse = responseText;
-            } else {
-                // Standard GPT-4 and earlier response structure
-                let finishReason = parsedResponse.choices[ CONFIG.UI.gpt4_response_path.choice_index ].finish_reason;
-                parsedResponse = parsedResponse.choices[ CONFIG.UI.gpt4_response_path.choice_index ].message.content;
-                // The token count of prompt + max_tokens will not exceed the model's context length. 
-                if( finishReason == 'length' ) {
-                    parsedResponse = parsedResponse + CONFIG.PROMPTS.response_truncated;
-                }
+                dom.response.innerText = textSoFar;
             }
+        } );
 
-            // store response in local cache under the same key used for the lookup above
-            sessionStorage.setItem( cacheKey, JSON.stringify( {
-                                            cachedDate: Date.now() 
-                                            , parsedResponse } ) 
-                                    );
+        if( ! fullText ) {
+            dom.response.innerText = CONFIG.PROMPTS.no_response;
+            return;
+        }
 
-            // display response 
-            dom.response.innerText = parsedResponse;
-            convertResponseFromMarkdown();
-            dom.spinner.style.display = "none";
-        })
-        .catch(error => {
-            console.error('Fetch error:', error);
-            dom.response.innerText = error.message;
-            dom.spinner.style.display = "none";
-        });
+        // store response in local cache under the same key used for the lookup above
+        sessionStorage.setItem( cacheKey, JSON.stringify( {
+                                        cachedDate: Date.now()
+                                        , parsedResponse: fullText } )
+                                );
+
+        dom.response.innerText = fullText;
+        convertResponseFromMarkdown();
     } catch( e ) {
-        console.error(e);
+        console.error( e );
         dom.response.innerText = e.message;
+    } finally {
         dom.spinner.style.display = "none";
     }
 }
