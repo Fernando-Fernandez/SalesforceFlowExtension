@@ -472,10 +472,10 @@ class FlowParser {
                     .join( '' );
     }
 
-    async parse( flowDefinition ) {
+    async parse( flowDefinition, subflowDefinitions, runStats ) {
         // surface any parsing failure instead of leaving the popup blank
         try {
-            await this.parseAndRender( flowDefinition );
+            await this.parseAndRender( flowDefinition, subflowDefinitions, runStats );
         } catch( e ) {
             console.error( 'Flow parsing failed:', e );
             dom.error.textContent = 'Could not parse this flow: ' + e.message;
@@ -483,7 +483,7 @@ class FlowParser {
         }
     }
 
-    async parseAndRender( flowDefinition ) {
+    async parseAndRender( flowDefinition, subflowDefinitions, runStats ) {
         // console.log( flowDefinition );
 
         let flowName = 'Flow:  ' + flowDefinition.label;
@@ -534,6 +534,9 @@ class FlowParser {
 
         renderLintResults( lintIssues );
 
+        // show how this flow has been doing in production lately
+        renderRunStats( runStats );
+
         // generate itemized description of the flow:  markdown for download/GPT,
         // and the same rows rendered as a DOM table
         let tableRows = this.getTableRows( actionMap );
@@ -548,6 +551,23 @@ class FlowParser {
             stepByStepMDTable += '\nPotential issues:\n'
                 + lintIssues.map( anIssue => `- (${ anIssue.severity }) ${ anIssue.message }` ).join( '\n' )
                 + '\n';
+        }
+
+        // include the run stats so the AI knows the flow is failing in practice
+        if( runStats && ( runStats.errorCount > 0 || runStats.pausedCount > 0 ) ) {
+            stepByStepMDTable += `\nRun stats: ${ runStats.errorCount } failed and `
+                + `${ runStats.pausedCount } paused interviews in the last ${ runStats.days } days.\n`;
+        }
+
+        // describe each called subflow so the AI sees one level deeper than
+        // just the subflow's name
+        for( const [ subflowName, subflowDefinition ] of Object.entries( subflowDefinitions ?? {} ) ) {
+            const { facts } = FlowParserShared.getFlowOverview( subflowDefinition );
+            const subflowLines = FlowParserShared.renderExplanation( facts );
+            stepByStepMDTable += `\nSubflow ${ subflowName }`
+                + ( subflowDefinition.label ? ` (${ subflowDefinition.label })` : '' )
+                + ' does the following:\n'
+                + subflowLines.map( aLine => `- ${ aLine }` ).join( '\n' ) + '\n';
         }
 
         createFlowTable( { flowName, flowDescription
@@ -618,7 +638,8 @@ chrome.runtime.onMessage.addListener(
     function( request, sender, sendResponse ) {
         if( request.flowDefinition ) {
             // fresh parser per message so traversal state (index, forks) starts clean
-            new FlowParser().parse( request.flowDefinition );
+            new FlowParser().parse( request.flowDefinition
+                                    , request.subflowDefinitions, request.runStats );
         }
     }
 );
@@ -749,6 +770,28 @@ function createFlowTable( { flowName, flowDescription, processType, tableRows, a
     };
 
     // table and button are already in the document, no need to append
+}
+
+// shows recent production failures/pauses of this flow under the explanation
+function renderRunStats( runStats ) {
+    let statsLine = document.getElementById( 'runStatsLine' );
+    if( statsLine ) {
+        statsLine.remove();
+    }
+    if( ! runStats || ( runStats.errorCount <= 0 && runStats.pausedCount <= 0 ) ) {
+        return;
+    }
+
+    statsLine = document.createElement( 'div' );
+    statsLine.id = 'runStatsLine';
+    statsLine.style.color = 'darkred';
+    statsLine.style.fontWeight = 'bold';
+    const failedPart = ( runStats.errorCount > 0
+        ? `failed ${ runStats.errorCount } time${ runStats.errorCount === 1 ? '' : 's' }` : '' );
+    const pausedPart = ( runStats.pausedCount > 0
+        ? `${ failedPart ? ' and ' : '' }has ${ runStats.pausedCount } paused interview${ runStats.pausedCount === 1 ? '' : 's' }` : '' );
+    statsLine.textContent = `⚠ This flow ${ failedPart }${ pausedPart } in the last ${ runStats.days } days.`;
+    dom.defaultExplainer.insertAdjacentElement( 'afterend', statsLine );
 }
 
 // shows the linter findings under the explanation; text nodes only

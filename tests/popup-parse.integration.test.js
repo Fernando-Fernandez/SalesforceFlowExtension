@@ -107,7 +107,16 @@ describe('popup parse integration', () => {
       constants: [{ name: 'cMax', dataType: 'Number', value: { numberValue: 5 } }]
     };
 
-    await messageListener({ flowDefinition }, {}, () => {});
+    const subflowDefinitions = {
+      Send_Alert: {
+        label: 'Send Alert',
+        startElementReference: 'Notify',
+        actionCalls: [{ name: 'Notify', label: 'Notify', actionName: 'emailSimple', actionType: 'emailAlert' }]
+      }
+    };
+    const runStats = { errorCount: 14, pausedCount: 2, days: 7 };
+
+    await messageListener({ flowDefinition, subflowDefinitions, runStats }, {}, () => {});
     // parse() is async fire-and-forget from the listener; let it settle
     await new Promise(resolve => setTimeout(resolve, 0));
 
@@ -123,5 +132,34 @@ describe('popup parse integration', () => {
     const table = document.getElementById('flowTableContainer');
     expect(table.style.display).toBe('block');
     expect(table.querySelectorAll('tbody tr').length).toBeGreaterThan(0);
+
+    // run-stats overlay rendered from the enrichment data
+    const statsLine = document.getElementById('runStatsLine');
+    expect(statsLine.textContent).toContain('failed 14 times');
+    expect(statsLine.textContent).toContain('2 paused interviews');
+    expect(statsLine.textContent).toContain('last 7 days');
+  });
+
+  test('should re-render without enrichment data and drop the stats line', async () => {
+    const flowDefinition = {
+      label: 'Bare Flow',
+      description: 'documented',
+      processType: 'Flow',
+      processMetadataValues: [
+        { name: 'BuilderType', value: { stringValue: 'LightningFlowBuilder' } },
+        { name: 'CanvasMode', value: { stringValue: 'AUTO_LAYOUT_CANVAS' } }
+      ],
+      startElementReference: 'Get_It',
+      recordLookups: [{
+        name: 'Get_It', label: 'Get It', object: 'Contact', description: 'd', getFirstRecordOnly: true
+      }]
+    };
+
+    await messageListener({ flowDefinition }, {}, () => {});
+    await new Promise(resolve => setTimeout(resolve, 0));
+
+    expect(document.getElementById('defaultExplainer').textContent).toContain('queries Contact records');
+    // the stale stats line from the previous message must be gone
+    expect(document.getElementById('runStatsLine')).toBeNull();
   });
 });

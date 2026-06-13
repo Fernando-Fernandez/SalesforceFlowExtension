@@ -121,6 +121,36 @@ describe('FlowParserShared', () => {
         .toEqual(['updates Contact record for each item in Loop Items']);
     });
 
+    test('should narrate assignments that touch input/output variables', () => {
+      const flowDefinition = {
+        startElementReference: 'Set_Result',
+        variables: [
+          { name: 'varResult', dataType: 'String', isInput: false, isOutput: true },
+          { name: 'varInput', dataType: 'String', isInput: true, isOutput: false },
+          { name: 'varScratch', dataType: 'String', isInput: false, isOutput: false }
+        ],
+        assignments: [{
+          name: 'Set_Result', label: 'Set Result',
+          assignmentItems: [
+            // writes an output variable from an input variable's field
+            { assignToReference: 'varResult', operator: 'Assign', value: { elementReference: 'varInput.Name' } }
+          ],
+          connector: { targetReference: 'Set_Scratch' }
+        }, {
+          name: 'Set_Scratch', label: 'Set Scratch',
+          assignmentItems: [
+            // internal bookkeeping only, must stay silent
+            { assignToReference: 'varScratch', operator: 'Assign', value: { stringValue: 'x' } }
+          ]
+        }]
+      };
+
+      const { facts } = FlowParserShared.getFlowOverview(flowDefinition);
+      const lines = FlowParserShared.renderExplanation(facts);
+
+      expect(lines).toEqual(['assigns varResult, varInput']);
+    });
+
     test('should not throw on flows with sparse element collections', () => {
       const flowDefinition = {
         startElementReference: 'Update_It',

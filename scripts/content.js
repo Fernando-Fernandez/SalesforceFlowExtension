@@ -35,8 +35,18 @@ const { getValue, removeHTML, buildDefinitionMap, findElementByLabel
 
 // the start-node tooltip shows at most this many summary lines
 const MAX_TOOLTIP_LINES = 15;
+// subflow drill-down limits
+const MAX_SUBFLOWS = 10;
+const MAX_SUBFLOW_TOOLTIP_LINES = 6;
+// run stats lookback window and badge element
+const RUN_STATS_DAYS = 7;
+const RUN_STATS_BADGE_ID = "sfFlowExtensionRunStats";
 
 let sfHost, sessionId, flowDefinition;
+// definitions of the flows this flow calls, keyed by developer name
+let subflowDefinitions = {};
+// { errorCount, pausedCount, days } or null when unavailable
+let runStats = null;
 
 // only execute event setup if within a Salesforce page
 let sfElement = document.querySelector( SELECTORS.salesforcePage );
@@ -71,6 +81,31 @@ async function getLatestAPIVersion( baseUrl ) {
     return DEFAULT_API_VERSION;
 }
 
+function salesforceGet( baseUrl, sessionId, path ) {
+    return fetch( "https://" + baseUrl + path, {
+        method: "GET"
+        , headers: {
+            "Content-Type": "application/json"
+            , "Authorization": "Bearer " + sessionId
+        }
+    } ).then( response => {
+        if( ! response.ok ) {
+            throw new Error( `Salesforce request failed (${ response.status }): ${ path }` );
+        }
+        return response.json();
+    } );
+}
+
+function toolingQuery( baseUrl, sessionId, apiVersion, soql ) {
+    return salesforceGet( baseUrl, sessionId
+        , `/services/data/${ apiVersion }/tooling/query/?q=${ encodeURIComponent( soql ) }` );
+}
+
+function dataQuery( baseUrl, sessionId, apiVersion, soql ) {
+    return salesforceGet( baseUrl, sessionId
+        , `/services/data/${ apiVersion }/query/?q=${ encodeURIComponent( soql ) }` );
+}
+
 async function setFlowDefinitionFromToolingAPI( baseUrl, sessionId ) {
     let params = location.search; // ?flowId=3013m000000XIygAAG
     let flowIdArray = params.match( /(?:flowId\=)(.*?)(?=&|$)/ );
@@ -82,18 +117,126 @@ async function setFlowDefinitionFromToolingAPI( baseUrl, sessionId ) {
     let apiVersion = await getLatestAPIVersion( baseUrl );
 
     // Tooling API endpoint:  /services/data/v63.0/tooling/sobjects/Flow/301...AAG
-    let endpoint = "https://" + baseUrl +  "/services/data/" + apiVersion + "/tooling/sobjects/Flow/" + flowId;
-    let request = {
-        method: "GET"
-        , headers: {
-          "Content-Type": "application/json"
-          , "Authorization": "Bearer " + sessionId
-        }
-    };
-    let response = await fetch( endpoint, request );
-    let data = await response.json();
+    let data = await salesforceGet( baseUrl, sessionId
+        , `/services/data/${ apiVersion }/tooling/sobjects/Flow/${ flowId }` );
     flowDefinition = data.Metadata;
     waitForFlowUI();
+
+    // enrich in the background; each settles independently and resends the
+    // definition to the popup if it is already open
+    fetchSubflowDefinitions( baseUrl, sessionId, apiVersion );
+    fetchRunStats( baseUrl, sessionId, apiVersion, data.DefinitionId );
+}
+
+// fetches the definitions of the flows this flow calls (one level deep) so
+// tooltips and the AI context can describe what the subflows do
+async function fetchSubflowDefinitions( baseUrl, sessionId, apiVersion ) {
+    try {
+        const subflowNames = [ ...new Set( ( flowDefinition.subflows ?? [] )
+                                .map( aSubflow => aSubflow.flowName )
+                                .filter( Boolean ) ) ].slice( 0, MAX_SUBFLOWS );
+        if( subflowNames.length <= 0 ) {
+            return;
+        }
+
+        const nameList = subflowNames.map( aName => `'${ aName }'` ).join( ',' );
+        const result = await toolingQuery( baseUrl, sessionId, apiVersion
+            , 'SELECT DeveloperName, ActiveVersionId, LatestVersionId FROM FlowDefinition'
+                + ` WHERE DeveloperName IN (${ nameList })` );
+
+        for( const record of result.records ?? [] ) {
+            // prefer the active version, like the running flow would
+            const versionId = record.ActiveVersionId ?? record.LatestVersionId;
+            if( ! versionId ) {
+                continue;
+            }
+            const data = await salesforceGet( baseUrl, sessionId
+                , `/services/data/${ apiVersion }/tooling/sobjects/Flow/${ versionId }` );
+            if( data.Metadata ) {
+                subflowDefinitions[ record.DeveloperName ] = data.Metadata;
+            }
+        }
+
+        resendDefinitionIfPopupOpen();
+    } catch( e ) {
+        console.log( 'Flow Extension: subflow definitions unavailable', e );
+    }
+}
+
+// counts errored and paused interviews of this flow in the lookback window;
+// silently does nothing in orgs where FlowInterview is not queryable
+async function fetchRunStats( baseUrl, sessionId, apiVersion, definitionId ) {
+    try {
+        if( ! definitionId ) {
+            return;
+        }
+        const nameResult = await toolingQuery( baseUrl, sessionId, apiVersion
+            , `SELECT DeveloperName FROM FlowDefinition WHERE Id = '${ definitionId }'` );
+        const developerName = nameResult.records?.[ 0 ]?.DeveloperName;
+        if( ! developerName ) {
+            return;
+        }
+
+        const baseQuery = 'SELECT COUNT() FROM FlowInterview'
+            + ` WHERE FlowVersionView.FlowDefinitionView.ApiName = '${ developerName }'`
+            + ` AND CreatedDate = LAST_N_DAYS:${ RUN_STATS_DAYS }`;
+        const errorResult = await dataQuery( baseUrl, sessionId, apiVersion
+            , baseQuery + " AND InterviewStatus = 'Error'" );
+        const pausedResult = await dataQuery( baseUrl, sessionId, apiVersion
+            , baseQuery + " AND InterviewStatus = 'Paused'" );
+
+        runStats = {
+            errorCount: errorResult.totalSize ?? 0
+            , pausedCount: pausedResult.totalSize ?? 0
+            , days: RUN_STATS_DAYS
+        };
+
+        displayRunStatsBadge();
+        resendDefinitionIfPopupOpen();
+    } catch( e ) {
+        console.log( 'Flow Extension: run stats unavailable', e );
+    }
+}
+
+// shows "⚠ N failed runs" next to the View Definition button; idempotent so
+// the observer and late-arriving stats can both call it
+function displayRunStatsBadge() {
+    if( ! runStats || ( runStats.errorCount <= 0 && runStats.pausedCount <= 0 ) ) {
+        return;
+    }
+    const showDefinitionButton = document.getElementById( SHOW_DEFINITION_BUTTON_ID );
+    if( ! showDefinitionButton ) {
+        return; // toolbar not rendered yet, the observer will call again
+    }
+
+    let badge = document.getElementById( RUN_STATS_BADGE_ID );
+    if( ! badge ) {
+        badge = document.createElement( "span" );
+        badge.setAttribute( "id", RUN_STATS_BADGE_ID );
+        badge.setAttribute( "style", "background-color: lightyellow; color: darkred; "
+            + "border: solid 1px darkred; border-radius: 4px; padding: 2px 8px; "
+            + "margin-right: 10px; font-weight: bold;" );
+        showDefinitionButton.parentElement.insertBefore( badge, showDefinitionButton );
+    }
+
+    const failedPart = ( runStats.errorCount > 0
+        ? `⚠ failed ${ runStats.errorCount } time${ runStats.errorCount === 1 ? '' : 's' }` : '' );
+    const pausedPart = ( runStats.pausedCount > 0
+        ? `${ failedPart ? ', ' : '' }${ runStats.pausedCount } paused` : '' );
+    badge.textContent = `${ failedPart }${ pausedPart } (last ${ runStats.days } days)`;
+}
+
+// single place that ships everything the popup needs
+function sendDefinitionToPopup() {
+    chrome.runtime.sendMessage( { flowDefinition, subflowDefinitions, runStats } );
+}
+
+// when enrichment finishes after the popup was opened, refresh its contents
+function resendDefinitionIfPopupOpen() {
+    const flowIframe = document.getElementById( "flowIframe" );
+    if( flowIframe && flowIframe.style.display !== "none" ) {
+        sendDefinitionToPopup();
+    }
 }
 
 const REATTACH_DEBOUNCE_MS = 500;
@@ -122,6 +265,8 @@ function setupFlowUI() {
     addHoverEvents( flowShapes );
 
     addShowDefinitionButton();
+
+    displayRunStatsBadge();
 }
 
 function addShowDefinitionButton() {
@@ -174,7 +319,7 @@ function showDefinition( showDefinitionButton ) {
                 return;
             }
             definitionSent = true;
-            chrome.runtime.sendMessage( { flowDefinition } );
+            sendDefinitionToPopup();
         };
         window.addEventListener( "message", ( event ) => {
             if( event.source === flowIframe.contentWindow
@@ -197,7 +342,7 @@ function showDefinition( showDefinitionButton ) {
         showDefinitionButton.innerText = "Hide Definition";
 
         // iframe is already loaded, so refresh its contents right away
-        chrome.runtime.sendMessage( { flowDefinition } );
+        sendDefinitionToPopup();
 
     } else {
         // hide flow iframe if visible
@@ -391,6 +536,26 @@ function displayTooltip( event, displayFlag ) {
         if( subflowName ) {
             let subflowNode = document.createTextNode( `(${subflowName})` );
             appendNodeAndLine( subflowNode );
+
+            // drill into the called flow when its definition was fetched
+            const subflowDefinition = subflowDefinitions[ subflowName ];
+            if( subflowDefinition ) {
+                const { facts } = getFlowOverview( subflowDefinition );
+                let subflowLines = renderExplanation( facts );
+                if( subflowLines.length > MAX_SUBFLOW_TOOLTIP_LINES ) {
+                    const hiddenCount = subflowLines.length - MAX_SUBFLOW_TOOLTIP_LINES;
+                    subflowLines = subflowLines.slice( 0, MAX_SUBFLOW_TOOLTIP_LINES );
+                    subflowLines.push( `…and ${ hiddenCount } more` );
+                }
+                if( subflowLines.length > 0 ) {
+                    let whichNode = document.createElement( "em" );
+                    whichNode.textContent = 'which:';
+                    appendNodeAndLine( whichNode );
+                    subflowLines.forEach( aLine => {
+                        appendNodeAndLine( document.createTextNode( ' - ' + aLine ) );
+                    } );
+                }
+            }
         }
     } catch( e ) {
     }

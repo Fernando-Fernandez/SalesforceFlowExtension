@@ -180,8 +180,9 @@ globalThis.FlowParserShared = ( function() {
     }
 
     // phrase describing what an element does, or null for elements that have
-    // no observable behavior worth narrating
-    function getActionText( element ) {
+    // no observable behavior worth narrating; interfaceVariables holds the
+    // names of the flow's input/output variables
+    function getActionText( element, interfaceVariables = new Set() ) {
         switch( element.type ) {
             case 'recordCreate':   return `inserts ${ element.object ?? element.inputReference } record`;
             case 'recordUpdate':   return `updates ${ element.object ?? element.inputReference } record`;
@@ -196,8 +197,35 @@ globalThis.FlowParserShared = ( function() {
                 return `prompts screen ${ element.label }`
                         + ( screenDescription ? ', ' + screenDescription : '' );
             }
+            case 'assignment': {
+                // only assignments touching the flow's input/output variables
+                // are part of its contract; internal bookkeeping stays silent
+                const interfaceVarsTouched = getReferencedInterfaceVariables(
+                                                element, interfaceVariables );
+                if( interfaceVarsTouched.length === 0 ) {
+                    return null;
+                }
+                return `assigns ${ interfaceVarsTouched.join( ', ' ) }`;
+            }
         }
         return null;
+    }
+
+    // the input/output variables an assignment writes to or reads from;
+    // references may be dotted (varName.field), the root is what matters
+    function getReferencedInterfaceVariables( element, interfaceVariables ) {
+        const referenced = new Set();
+        element.assignmentItems?.forEach( anItem => {
+            const target = anItem.assignToReference?.split( '.' )[ 0 ];
+            if( interfaceVariables.has( target ) ) {
+                referenced.add( target );
+            }
+            const source = anItem.value?.elementReference?.split( '.' )[ 0 ];
+            if( interfaceVariables.has( source ) ) {
+                referenced.add( source );
+            }
+        } );
+        return [ ...referenced ];
     }
 
     // walks up the chain of branches an element inherited to detect whether
@@ -220,11 +248,20 @@ globalThis.FlowParserShared = ( function() {
     // consumed by the explanation renderer and available to the linter
     function extractFacts( actionMap ) {
         const facts = [];
+
+        // the flow's contract:  variables marked as input or output
+        const interfaceVariables = new Set();
+        for( const [ name, element ] of actionMap ) {
+            if( element.type === 'variable' && ( element.isInput || element.isOutput ) ) {
+                interfaceVariables.add( name );
+            }
+        }
+
         const orderedElements = [ ...actionMap.values() ]
                                     .filter( anElement => anElement.index )
                                     .sort( ( a, b ) => a.index - b.index );
         for( const element of orderedElements ) {
-            const actionText = getActionText( element );
+            const actionText = getActionText( element, interfaceVariables );
             if( ! actionText ) {
                 continue;
             }
