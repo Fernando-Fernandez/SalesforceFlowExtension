@@ -24,6 +24,9 @@ const CONFIG = {
     // System prompts and messages
     PROMPTS: {
         default: `Your purpose is to help everyone quickly understand what this Salesforce flow does and how. Let us think step-by-step and briefly summarize the flow in the format: \\npurpose of the flow, the main objects queried/inserted/updated, dependencies (labels, hard-coded ids, values, emails, names, etc) from outside the flow, the main conditions it evaluates, and any potential or evident issues.\\nFLOW: \\n`,
+        find_issues: `Review this Salesforce flow for problems. Identify bugs, anti-patterns, performance and governor-limit risks (DML or SOQL inside loops, missing fault paths, hardcoded ids, unconditional record updates), and maintainability concerns. For each issue, name the element, explain why it is a problem, and recommend a concrete fix.\\nFLOW: \\n`,
+        generate_docs: `Write clear documentation for this Salesforce flow suitable for a technical wiki. Cover: its purpose, what triggers it and when, the objects it reads and writes, the decisions and branches it evaluates, external dependencies (labels, ids, named credentials, subflows), and the outcome of each path.\\nFLOW: \\n`,
+        suggest_descriptions: `For every element in this Salesforce flow that has no description, suggest a concise one-sentence description of what that element does and why. Return a list mapping each element name to its suggested description; skip elements that already have a description.\\nFLOW: \\n`,
         system: 'You are an expert at troubleshooting and explaining Salesforce flows.',
         no_response: 'No response content received from the model'
     },
@@ -59,6 +62,9 @@ const dom = {
     error: document.getElementById('error'),
     spinner: document.getElementById('spinner'),
     gptButton: document.getElementById('gptButton'),
+    findIssuesButton: document.getElementById('findIssuesButton'),
+    generateDocsButton: document.getElementById('generateDocsButton'),
+    suggestDescriptionsButton: document.getElementById('suggestDescriptionsButton'),
     modelSelect: document.getElementById('modelSelect'),
     customModelName: document.getElementById('custom-model-name'),
     providerSelection: document.getElementById('providerSelection'),
@@ -614,9 +620,9 @@ class FlowParser {
             return;
         }
 
-        // make button call the selected AI provider
-        // (handler property so the latest flow's data replaces any previous handler)
-        dom.gptButton.onclick = async () => {
+        // sends one prompt about the current flow to the selected provider;
+        // shared by the Ask-AI button and the canned task buttons below it
+        const askAI = async ( promptText ) => {
             dom.spinner.style.display = "inline-block";
             dom.error.innerText = '';
 
@@ -627,28 +633,45 @@ class FlowParser {
             if( AIProviders.PROVIDERS[ provider ].requiresKey && ! apiKey ) {
                 dom.spinner.style.display = "none";
                 dom.error.innerText = CONFIG.ERRORS.no_key;
+                setAiSettingsOpen( true );
                 return;
             }
 
-            dom.response.innerText = 'Asking ' + AIProviders.PROVIDERS[ provider ].label
-                                    + ' to explain current flow...';
-
-            // accept user question, otherwise use default prompt
-            let prompt;
-            if( dom.gptQuestion && dom.gptQuestion.value ) {
-                prompt = dom.gptQuestion.value + '\\nFLOW: \\n';
-            } else {
-                prompt = `This flow: ${explanationLines.join( ' \\n ' )} ` + CONFIG.PROMPTS.default;
-            }
+            dom.response.innerText = 'Asking ' + AIProviders.PROVIDERS[ provider ].label + '...';
 
             sendToAI( {
                 currentURL: window.location.href
                 , resultData: stepByStepMDTable
-                , prompt: prompt
+                , prompt: promptText
                 , provider: provider
                 , model: model
             }, apiKey );
         };
+
+        // prefixes a task prompt with the plain-English summary for context
+        const withFlowSummary = ( taskPrompt ) =>
+            `This flow: ${ explanationLines.join( ' \\n ' ) } ` + taskPrompt;
+
+        // make the buttons call the selected AI provider
+        // (handler properties so the latest flow's data replaces any previous handler)
+        dom.gptButton.onclick = () => {
+            // accept the user's question, otherwise use the default summary prompt
+            const prompt = ( dom.gptQuestion && dom.gptQuestion.value )
+                ? dom.gptQuestion.value + '\\nFLOW: \\n'
+                : withFlowSummary( CONFIG.PROMPTS.default );
+            askAI( prompt );
+        };
+
+        const taskButtons = [
+            [ dom.findIssuesButton, CONFIG.PROMPTS.find_issues ],
+            [ dom.generateDocsButton, CONFIG.PROMPTS.generate_docs ],
+            [ dom.suggestDescriptionsButton, CONFIG.PROMPTS.suggest_descriptions ]
+        ];
+        taskButtons.forEach( ( [ button, taskPrompt ] ) => {
+            if( button ) {
+                button.onclick = () => askAI( withFlowSummary( taskPrompt ) );
+            }
+        } );
     }
 }
 

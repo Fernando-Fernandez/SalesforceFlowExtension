@@ -199,6 +199,36 @@ H4 {
     gap: 8px;
 }
 
+/* canned task buttons under the Ask-AI row, smaller than the main buttons */
+#explainTasks {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 8px;
+}
+
+.task-btn {
+    font-size: 11px;
+    font-weight: 600;
+    padding: 4px 10px;
+    border: 1px solid #c7d2e0;
+    border-radius: 6px;
+    background-color: #eef2f7;
+    color: #1f3a5f;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: background-color 0.15s ease, border-color 0.15s ease;
+}
+
+.task-btn:hover {
+    background-color: #e0e8f2;
+    border-color: #4a90e2;
+}
+
+.task-btn:active {
+    background-color: #d4deec;
+}
+
 #gptDialogContainer label {
     width: 100%;
     font-size: 12px;

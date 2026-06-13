@@ -37,6 +37,11 @@ describe('popup parse integration', () => {
           <input id="gptQuestion" type="text" />
           <button id="gptButton"></button>
         </div>
+        <div id="explainTasks">
+          <button id="findIssuesButton"></button>
+          <button id="generateDocsButton"></button>
+          <button id="suggestDescriptionsButton"></button>
+        </div>
         <div id="spinner"></div>
         <span id="response"></span>
       </section>
