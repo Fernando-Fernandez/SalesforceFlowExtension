@@ -6,30 +6,34 @@
     <link rel="stylesheet" href="./popup.css" />
 </head>
 <body>
-    <div id="main">
-        <div id="leftPanel">
-            <div id="defaultExplainer">
-            </div>
+    <!-- TOP AREA: flow header + issues on the left, action buttons + the AI
+         dialogs on the right; the table spans the full width below -->
+    <div id="topGrid">
+        <div id="leftColumn">
+            <header id="appHeader">
+                <div id="flowTitle">Salesforce Flow</div>
+                <div id="flowMeta"></div>
+                <div id="defaultExplainer"></div>
+            </header>
 
-            <div id="lintResults"></div>
+            <div id="errorBar"><span id="error"></span></div>
 
-            <div id="flowExplainer" >
-                <div id="gptInputs" >
-                    <div id="gptDialogContainer" style="display: none;">
-                        <label for="gptQuestion">Ask your question or leave blank for default prompt:</label>
-                        <input id="gptQuestion" type="text" />
-                        <button id="gptButton">Ask GPT</button>
-                    </div>
-                </div>
-                <span id="error" style="font-weight: bold; color: red;" ></span>
-                <br />
-                <div id="spinner" class="lds-dual-ring">&#x263C;</div>
-                <span id="response" > </span>
-            </div>
+            <!-- ISSUE SUMMARY: linter findings -->
+            <section id="issueSummary">
+                <div id="lintResults"></div>
+            </section>
         </div>
 
-        <div id="rightPanel">
-            <div id="gpt" >
+        <aside id="rightColumn">
+            <div id="headerActions">
+                <button id="downloadButton" class="action-btn" style="display: none;">&#x2193; Markdown</button>
+                <button id="downloadMermaidButton" class="action-btn" style="display: none;">&#x2193; Mermaid</button>
+                <button id="aiSettingsToggle" class="action-btn">&#x2699; AI Settings</button>
+            </div>
+
+            <!-- AI SETTINGS dialog (popped out by the AI Settings button) -->
+            <section id="aiSettingsPanel" class="panel" style="display: none;">
+                <div class="panel-title">&#x2699; AI Settings</div>
                 <div id="providerSelection" class="model-selection-inline">
                     <span class="model-selection-label">AI Provider:</span>
                     <div class="model-options-inline">
@@ -55,16 +59,15 @@
                 <div id="apiKeyRow">
                     <label for="openAIKey" id="apiKeyLabel">OpenAI API Key</label>
                     <input id="openAIKey" type="password" name="openAIKey" />
-                    &nbsp;&nbsp;
-                    <button id="setKey" >Set key</button>
+                    <button id="setKey" class="action-btn">Set key</button>
                 </div>
                 <div id="ollamaHint" style="display: none;">
-                    Ollama runs locally at http://localhost:11434 — no API key needed.
+                    Ollama runs locally at http://localhost:11434 &mdash; no API key needed.
                     If requests fail with 403, start Ollama with
                     OLLAMA_ORIGINS=chrome-extension://* and try again.
                 </div>
 
-                <div id="gptModelSelection" class="model-selection" style="display: none;">
+                <div id="gptModelSelection" class="model-selection">
                     <div class="model-selection-inline">
                         <span class="model-selection-label">AI Model:</span>
                         <select id="modelSelect"></select>
@@ -72,14 +75,27 @@
                                placeholder="custom model name" />
                     </div>
                 </div>
-            </div>
-        </div>
+            </section>
+
+            <!-- EXPLAIN / Ask-AI dialog (always visible) -->
+            <section id="explainPanel" class="panel">
+                <div class="panel-title">&#x2728; Explain</div>
+                <div id="gptDialogContainer">
+                    <label for="gptQuestion">Ask your question or leave blank for default prompt:</label>
+                    <input id="gptQuestion" type="text" />
+                    <button id="gptButton" class="action-btn action-btn-primary">Ask AI</button>
+                </div>
+                <div id="spinner" class="lds-dual-ring">&#x263C;</div>
+                <span id="response"> </span>
+            </section>
+        </aside>
     </div>
-    <div id="flow" >
-        <button id="downloadButton" style="display: none;">Download Flow Definition in MarkDown Format</button>
-        <button id="downloadMermaidButton" style="display: none;">Download Mermaid Diagram</button>
+
+    <!-- FLOW ELEMENTS: the itemized table, full width -->
+    <section id="flow">
         <div id="flowTableContainer" style="display: none;"></div>
-    </div>
+    </section>
+
     <script src="./scripts/flowParser.js"></script>
     <script src="./scripts/aiProviders.js"></script>
     <script src="./scripts/popup.js"></script>

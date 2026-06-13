@@ -1,20 +1,27 @@
 @media print {
-    @page {size: landscape}
-    button {
-      display: none;
+    @page { size: landscape; }
+    #rightColumn,
+    #errorBar { display: none !important; }
+    #topGrid {
+        display: block !important;
+        padding: 0 !important;
     }
     #flow {
-        border: none!important;
+        border: none !important;
+        margin: 0 !important;
+    }
+    #flowTableContainer {
+        max-height: none !important;
+        overflow: visible !important;
     }
 }
-#flow {
-    width: 100%; 
-    height: 90vh; 
-    overflow: auto; 
-    border: 1px solid lightgray;
-}
-BODY {
-    background-color: white;
+
+body {
+    margin: 0;
+    background-color: #ffffff;
+    color: #1b1f23;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    font-size: 13px;
 }
 
 H4 {
@@ -22,43 +29,286 @@ H4 {
     margin-block-end: 0;
 }
 
-#main {
+/* ---- HEADER ---- */
+#appHeader {
+    min-width: 0;
+}
+
+#flowTitle {
+    font-size: 18px;
+    font-weight: 700;
+    line-height: 1.2;
+    color: #24292e;
+}
+
+#flowMeta {
+    margin-top: 4px;
+    font-size: 12px;
+    color: #586069;
+}
+
+.meta-badge {
+    display: inline-block;
+    background-color: #eaeef2;
+    color: #24292e;
+    border-radius: 10px;
+    padding: 1px 8px;
+    margin-right: 6px;
+    font-weight: 600;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.02em;
+}
+
+#defaultExplainer {
+    margin-top: 8px;
+    font-size: 13px;
+    line-height: 1.5;
+}
+
+#runStatsLine {
+    margin-top: 6px;
+}
+
+#headerActions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    justify-content: flex-end;
+}
+
+/* ---- BUTTONS (filled, conspicuous) ---- */
+.action-btn {
+    font-size: 12px;
+    font-weight: 600;
+    padding: 7px 14px;
+    border: 1px solid transparent;
+    border-radius: 6px;
+    background-color: #2563eb;
+    color: #ffffff;
+    cursor: pointer;
+    white-space: nowrap;
+    box-shadow: 0 1px 2px rgba(16, 24, 40, 0.12);
+    transition: background-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.action-btn:hover {
+    background-color: #1d4ed8;
+    box-shadow: 0 2px 5px rgba(16, 24, 40, 0.2);
+}
+
+.action-btn:active {
+    background-color: #1e40af;
+}
+
+/* the main call to action stands apart from the blue utility buttons */
+.action-btn-primary {
+    background-color: #16a34a;
+}
+
+.action-btn-primary:hover {
+    background-color: #15803d;
+}
+
+.action-btn-primary:active {
+    background-color: #166534;
+}
+
+/* pressed-in look while the AI Settings dialog is open */
+.action-btn.active {
+    background-color: #1e3a8a;
+    box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.35);
+}
+
+/* ---- ERROR BAR ---- */
+#errorBar {
+    padding: 0 16px;
+}
+
+#errorBar #error {
+    color: #b00020;
+    font-weight: bold;
+}
+
+#errorBar #error:not(:empty) {
+    display: inline-block;
+    margin-top: 8px;
+}
+
+/* ---- TOP AREA: header/issues (left) and buttons/AI dialogs (right) ---- */
+#topGrid {
     display: grid;
     grid-template-columns: 1fr 1fr;
+    gap: 16px;
+    padding: 12px 16px 16px;
+    align-items: start;
+}
+
+#leftColumn {
+    min-width: 0;
+}
+
+#rightColumn {
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+/* ---- ISSUE SUMMARY ---- */
+#lintResults:not(:empty) {
+    margin-bottom: 12px;
+    padding: 10px 12px;
+    border: 1px solid #f0d8a8;
+    border-left: 3px solid #e0a800;
+    border-radius: 6px;
+    background-color: #fff9e6;
+}
+
+#lintResults b {
+    display: block;
+    margin-bottom: 4px;
+}
+
+#lintResults div {
+    font-size: 12px;
+    line-height: 1.5;
+}
+
+/* ---- AI DIALOG CARDS ---- */
+.panel {
+    padding: 12px;
+    border: 1px solid #e1e4e8;
+    border-radius: 8px;
+    background-color: #f9fafb;
+}
+
+.panel-title {
+    font-size: 13px;
+    font-weight: 700;
+    color: #24292e;
+    margin-bottom: 10px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid #e1e4e8;
+}
+
+#gptDialogContainer {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+}
+
+#gptDialogContainer label {
+    width: 100%;
+    font-size: 12px;
+    font-weight: 600;
+}
+
+#gptQuestion {
+    flex: 1;
+    min-width: 160px;
+    padding: 6px 8px;
+    border: 1px solid #d0d7de;
+    border-radius: 6px;
+    font-size: 12px;
+}
+
+#apiKeyRow {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-top: 10px;
+}
+
+#apiKeyRow label {
+    width: 100%;
+    font-size: 12px;
+    font-weight: 600;
+}
+
+#openAIKey {
+    flex: 1;
+    min-width: 160px;
+    padding: 6px 8px;
+    border: 1px solid #d0d7de;
+    border-radius: 6px;
+    font-size: 12px;
+}
+
+#ollamaHint {
+    margin-top: 10px;
+    font-size: 12px;
+    color: #586069;
+    line-height: 1.5;
+}
+
+#response {
+    display: block;
+    margin-top: 10px;
+    font-size: 13px;
+    line-height: 1.5;
+}
+
+/* ---- FLOW ELEMENTS TABLE (full width) ---- */
+#flow {
+    margin: 0 16px 16px;
+    border: 1px solid #e1e4e8;
+    border-radius: 8px;
+    overflow: hidden;
+    background-color: #ffffff;
 }
 
 #flowTableContainer {
-    font-size: medium !important;
+    overflow: auto;
+    max-height: 64vh;
 }
 
 #flowTable {
-    border: solid 1px gray;
-    border-collapse: collapse!important;
-    width: 95%;
+    border-collapse: collapse;
+    width: 100%;
+    font-size: 12px;
 }
 
-#flowTable THEAD {
-    background-color: darkslategray;
-    color: white;
+#flowTable thead {
+    background-color: #2f4f4f;
+    color: #ffffff;
     font-weight: bold;
-    text-align: center;
-    vertical-align: middle;
+    text-align: left;
     text-transform: uppercase;
+    font-size: 11px;
+    letter-spacing: 0.02em;
 }
 
-#flowTable TD {
-    border: solid 1px lightgray;
-    padding: 8px;
+#flowTable th,
+#flowTable td {
+    border: 1px solid #e1e4e8;
+    padding: 6px 8px;
+    text-align: left;
+    vertical-align: top;
 }
 
-#flowTable TBODY TD:first-child {
-    background-color: lightgray;
-    font-weight: bold;
-    text-align: center;
+#flowTable tbody tr:nth-child(even) {
+    background-color: #f6f8fa;
 }
 
-#flowTable TBODY TD:nth-child(4), #flowTable TBODY TD:nth-child(6) {
-    text-align: center;
+#flowTable tbody tr:hover {
+    background-color: #eef4ff;
+}
+
+#flowTable tbody td:first-child {
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+#flowTable a {
+    color: #1a5fb4;
+    text-decoration: none;
+}
+
+#flowTable a:hover {
+    text-decoration: underline;
 }
 
 .lds-dual-ring {
@@ -79,15 +329,12 @@ H4 {
 
 .smallText {
     font-size: x-small;
+    font-weight: normal;
 }
 
 /* Model Selection Styles */
 .model-selection {
-    margin: 5px 0 5px 0;
-    border: 1px solid #e0e0e0;
-    border-radius: 8px;
-    padding: 2px;
-    background-color: #f9f9f9;
+    margin: 10px 0 0 0;
 }
 
 /* Inline layout for label and radio buttons */
@@ -95,12 +342,13 @@ H4 {
     display: flex;
     align-items: center;
     gap: 12px;
+    flex-wrap: wrap;
 }
 
 .model-selection-label {
     font-weight: bold;
     color: #333;
-    font-size: 14px;
+    font-size: 13px;
     white-space: nowrap;
 }
 
@@ -148,33 +396,31 @@ H4 {
     border-color: #4a90e2;
 }
 
-/* Custom Model Input Styles */
-.custom-model-input {
-    margin-top: 4px;
-    padding: 4px;
-    background-color: #f8f9fa;
-    border: 1px solid #e0e0e0;
+#modelSelect {
+    padding: 5px 8px;
+    border: 1px solid #ddd;
     border-radius: 6px;
+    font-size: 12px;
+    background-color: white;
 }
 
-.custom-model-input input[type="text"] {
-    width: 100%;
+/* Custom Model Input Styles */
+#custom-model-name {
     padding: 6px 8px;
     border: 1px solid #ddd;
     border-radius: 4px;
     font-size: 12px;
     font-family: monospace;
     background-color: white;
-    box-sizing: border-box;
 }
 
-.custom-model-input input[type="text"]:focus {
+#custom-model-name:focus {
     outline: none;
     border-color: #4a90e2;
     box-shadow: 0 0 0 2px rgba(74, 144, 226, 0.2);
 }
 
-.custom-model-input input[type="text"]::placeholder {
+#custom-model-name::placeholder {
     color: #999;
     font-style: italic;
 }

@@ -8,30 +8,38 @@ describe('popup parse integration', () => {
   beforeAll(() => {
     // the element ids popup.js caches at load (mirrors popup.html)
     document.body.innerHTML = `
+      <div id="flowTitle"></div>
+      <div id="flowMeta"></div>
       <div id="defaultExplainer"></div>
+      <div id="errorBar"><span id="error"></span></div>
       <div id="lintResults"></div>
-      <div id="gptDialogContainer" style="display:none;"></div>
-      <input id="gptQuestion" type="text" />
-      <button id="gptButton"></button>
-      <span id="error"></span>
-      <div id="spinner"></div>
-      <span id="response"></span>
-      <div id="providerSelection">
-        <input type="radio" name="ai-provider" value="openai" checked>
-        <input type="radio" name="ai-provider" value="anthropic">
-        <input type="radio" name="ai-provider" value="gemini">
-        <input type="radio" name="ai-provider" value="ollama">
-      </div>
-      <div id="apiKeyRow">
-        <label id="apiKeyLabel" for="openAIKey"></label>
-        <input id="openAIKey" type="password" />
-        <button id="setKey"></button>
-      </div>
-      <div id="ollamaHint" style="display:none;"></div>
-      <div id="gptModelSelection" style="display:none;">
-        <select id="modelSelect"></select>
-        <input type="text" id="custom-model-name" style="display:none;" />
-      </div>
+      <button id="aiSettingsToggle"></button>
+      <section id="aiSettingsPanel" class="panel" style="display:none;">
+        <div id="providerSelection">
+          <input type="radio" name="ai-provider" value="openai" checked>
+          <input type="radio" name="ai-provider" value="anthropic">
+          <input type="radio" name="ai-provider" value="gemini">
+          <input type="radio" name="ai-provider" value="ollama">
+        </div>
+        <div id="apiKeyRow">
+          <label id="apiKeyLabel" for="openAIKey"></label>
+          <input id="openAIKey" type="password" />
+          <button id="setKey"></button>
+        </div>
+        <div id="ollamaHint" style="display:none;"></div>
+        <div id="gptModelSelection">
+          <select id="modelSelect"></select>
+          <input type="text" id="custom-model-name" style="display:none;" />
+        </div>
+      </section>
+      <section id="explainPanel" class="panel">
+        <div id="gptDialogContainer">
+          <input id="gptQuestion" type="text" />
+          <button id="gptButton"></button>
+        </div>
+        <div id="spinner"></div>
+        <span id="response"></span>
+      </section>
       <button id="downloadButton" style="display:none;"></button>
       <button id="downloadMermaidButton" style="display:none;"></button>
       <div id="flowTableContainer" style="display:none;"></div>
@@ -121,10 +129,18 @@ describe('popup parse integration', () => {
     // parse() is async fire-and-forget from the listener; let it settle
     await new Promise(resolve => setTimeout(resolve, 0));
 
+    // the header region carries the flow name and type badge
+    expect(document.getElementById('flowTitle').textContent).toBe('Test Flow');
+    expect(document.getElementById('flowMeta').textContent).toContain('AutoLaunchedFlow');
+
     const explainer = document.getElementById('defaultExplainer');
     expect(explainer.textContent).toContain('This flow:');
     expect(explainer.textContent).toContain('queries Account records');
     expect(explainer.textContent).toContain('updates Loop_Accounts record for each item in Loop Accounts');
+
+    // openai requires a key and none is stored, so the AI Settings dialog
+    // pops out to surface the key input
+    expect(document.getElementById('aiSettingsPanel').style.display).toBe('block');
 
     const lint = document.getElementById('lintResults');
     expect(lint.textContent).toContain('Potential issues:');

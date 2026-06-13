@@ -58,9 +58,7 @@ const dom = {
     response: document.getElementById('response'),
     error: document.getElementById('error'),
     spinner: document.getElementById('spinner'),
-    gptDialogContainer: document.getElementById('gptDialogContainer'),
     gptButton: document.getElementById('gptButton'),
-    gptModelSelection: document.getElementById('gptModelSelection'),
     modelSelect: document.getElementById('modelSelect'),
     customModelName: document.getElementById('custom-model-name'),
     providerSelection: document.getElementById('providerSelection'),
@@ -166,6 +164,26 @@ dom.customModelName.oninput = () => {
 };
 
 applyProviderSelection( getSelectedProvider() );
+
+// ---- AI Settings dialog (popped out by its header button; the Ask-AI
+// dialog beside it stays visible) ----
+const aiSettingsPanel = document.getElementById( 'aiSettingsPanel' );
+const aiSettingsToggle = document.getElementById( 'aiSettingsToggle' );
+
+function setAiSettingsOpen( open ) {
+    if( ! aiSettingsPanel ) {
+        return;
+    }
+    aiSettingsPanel.style.display = ( open ? 'block' : 'none' );
+    if( aiSettingsToggle ) {
+        aiSettingsToggle.classList.toggle( 'active', open );
+    }
+}
+
+if( aiSettingsToggle ) {
+    aiSettingsToggle.onclick = () => setAiSettingsOpen(
+        !! aiSettingsPanel && aiSettingsPanel.style.display === 'none' );
+}
 
 class FlowParser {
     parseValue( rightValue ) {
@@ -590,12 +608,11 @@ class FlowParser {
             dom.spinner.style.display = "none";
             dom.response.innerText = '';
             dom.error.innerText = CONFIG.ERRORS.no_key;
+            // pop the settings out so the key field is visible and the
+            // message is actionable
+            setAiSettingsOpen( true );
             return;
         }
-
-        // the selected provider is usable, show the ask-AI dialog
-        dom.gptDialogContainer.style.display = 'block';
-        dom.gptModelSelection.style.display = 'block';
 
         // make button call the selected AI provider
         // (handler property so the latest flow's data replaces any previous handler)
@@ -678,25 +695,42 @@ function appendMultilineText( container, text ) {
     } );
 }
 
+// writes the flow name into the page header, with the process type as a
+// badge followed by the description; text nodes only, so the flow's own
+// label/description cannot inject HTML
+function renderFlowHeader( flowName, processType, flowDescription ) {
+    let titleEl = document.getElementById( 'flowTitle' );
+    if( titleEl ) {
+        titleEl.textContent = flowName;
+    }
+
+    let metaEl = document.getElementById( 'flowMeta' );
+    if( ! metaEl ) {
+        return;
+    }
+    metaEl.innerHTML = '';
+    if( processType ) {
+        let badge = document.createElement( 'span' );
+        badge.className = 'meta-badge';
+        badge.textContent = processType;
+        metaEl.appendChild( badge );
+    }
+    if( flowDescription ) {
+        metaEl.appendChild( document.createTextNode( flowDescription ) );
+    }
+}
+
 // builds the flow table with DOM APIs from the structured rows;
 // the markdown version is kept only for the download button and GPT
 function createFlowTable( { flowName, flowDescription, processType, tableRows, actionMap, stepByStepMDTable, mermaidDiagram } ) {
     dom.flowTableContainer.style.display = 'block';
     dom.flowTableContainer.innerHTML = '';
 
-    // heading with flow name, description and type
-    let heading = document.createElement( 'div' );
-    [ [ 'Flow:', flowName.replace( 'Flow:  ', '' ) ]
-    , [ 'Description:', flowDescription ]
-    , [ 'Type:', processType ] ].forEach( ( [ label, value ] ) => {
-        let bold = document.createElement( 'span' );
-        bold.style.fontWeight = 'bold';
-        bold.innerText = label;
-        heading.appendChild( bold );
-        heading.appendChild( document.createTextNode( ' ' + ( value ?? '' ) ) );
-        heading.appendChild( document.createElement( 'br' ) );
-    } );
-    dom.flowTableContainer.appendChild( heading );
+    const plainFlowName = flowName.replace( 'Flow:  ', '' );
+
+    // the flow name, type and description live in the page header now;
+    // the type shows as a badge and the description follows it
+    renderFlowHeader( plainFlowName, processType, flowDescription );
 
     let table = document.createElement( 'table' );
     table.id = 'flowTable';
@@ -750,8 +784,6 @@ function createFlowTable( { flowName, flowDescription, processType, tableRows, a
 
     // download buttons (handler properties so re-parsing replaces the
     // handlers instead of stacking duplicates)
-    const plainFlowName = flowName.replace( 'Flow:  ', '' );
-
     // the markdown download embeds the diagram in a fenced block so GitHub
     // and VS Code render it; the AI input is not affected
     let downloadButton = document.getElementById( 'downloadButton' );
