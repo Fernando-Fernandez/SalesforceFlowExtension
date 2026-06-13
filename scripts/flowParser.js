@@ -246,16 +246,21 @@ globalThis.FlowParserShared = ( function() {
     // extracts structured facts (what the flow does and under which branch)
     // from a graph already indexed by indexElements, in execution order;
     // consumed by the explanation renderer and available to the linter
-    function extractFacts( actionMap ) {
-        const facts = [];
-
-        // the flow's contract:  variables marked as input or output
+    // the flow's contract:  variables marked as input or output
+    function collectInterfaceVariables( actionMap ) {
         const interfaceVariables = new Set();
         for( const [ name, element ] of actionMap ) {
             if( element.type === 'variable' && ( element.isInput || element.isOutput ) ) {
                 interfaceVariables.add( name );
             }
         }
+        return interfaceVariables;
+    }
+
+    function extractFacts( actionMap ) {
+        const facts = [];
+
+        const interfaceVariables = collectInterfaceVariables( actionMap );
 
         const orderedElements = [ ...actionMap.values() ]
                                     .filter( anElement => anElement.index )
@@ -386,6 +391,77 @@ globalThis.FlowParserShared = ( function() {
         return issues;
     }
 
+    // mermaid labels: quotes and pipes would terminate the quoted string or
+    // the edge label, everything else is legal inside double quotes
+    function escapeMermaid( text ) {
+        return String( text ).replaceAll( '"', '#quot;' ).replaceAll( '|', '/' );
+    }
+
+    // renders the full element graph as a mermaid flowchart:  one shaped node
+    // per canvas element carrying the same explanation the tooltips show, and
+    // one labeled edge per branch (fault paths dotted)
+    function generateMermaidDiagram( actionMap, title ) {
+        const interfaceVariables = collectInterfaceVariables( actionMap );
+        const lines = [];
+        if( title ) {
+            lines.push( '---' );
+            lines.push( `title: "${ escapeMermaid( title ) }"` );
+            lines.push( '---' );
+        }
+        lines.push( 'flowchart TD' );
+
+        const isDiagramNode = ( element ) =>
+            element.type === 'start' || CONNECTABLE_TYPES.has( element.type );
+
+        // nodes
+        for( const [ name, element ] of actionMap ) {
+            if( ! isDiagramNode( element ) ) {
+                continue;
+            }
+            const textLines = [ element.label ?? element.name ];
+            if( element.type !== 'start' ) {
+                textLines.push( `(${ element.type })` );
+            }
+            const actionText = getActionText( element, interfaceVariables );
+            if( actionText ) {
+                textLines.push( actionText );
+            }
+            const text = escapeMermaid( textLines.join( '<br/>' ) );
+
+            let nodeDefinition;
+            if( element.type === 'start' ) {
+                nodeDefinition = `${ name }(["${ text }"])`;
+            } else if( element.type === 'decision' ) {
+                nodeDefinition = `${ name }{"${ text }"}`;
+            } else if( element.type === 'loop' ) {
+                nodeDefinition = `${ name }{{"${ text }"}}`;
+            } else {
+                nodeDefinition = `${ name }["${ text }"]`;
+            }
+            lines.push( '    ' + nodeDefinition );
+        }
+
+        // edges, labeled with the same branch phrases the explanations use
+        for( const [ name, element ] of actionMap ) {
+            if( ! isDiagramNode( element ) ) {
+                continue;
+            }
+            element.branchArray?.forEach( ( target, branchIndex ) => {
+                if( ! target || ! actionMap.has( target ) ) {
+                    return;
+                }
+                const label = element.branchLabelArray?.[ branchIndex ];
+                const isFaultBranch = ( target === element.faultElement
+                                        && label?.startsWith( 'if ' ) );
+                const arrow = ( isFaultBranch ? '-.->' : '-->' );
+                const labelPart = ( label ? `|"${ escapeMermaid( label ) }"|` : '' );
+                lines.push( `    ${ name } ${ arrow }${ labelPart } ${ target }` );
+            } );
+        }
+
+        return lines.join( '\n' );
+    }
+
     // assigns a sequential execution index to every element reachable from the
     // first element, following all branches recursively, and links each element
     // to the branch (decision/loop/fault) it flows from; used to order the
@@ -453,6 +529,7 @@ globalThis.FlowParserShared = ( function() {
         , renderExplanation
         , getFlowOverview
         , lintFlow
+        , generateMermaidDiagram
         , indexElements
     };
 } )();

@@ -188,6 +188,70 @@ describe('FlowParserShared', () => {
     });
   });
 
+  describe('generateMermaidDiagram', () => {
+    function makeOverview(flowDefinition) {
+      const { actionMap } = FlowParserShared.getFlowOverview(flowDefinition);
+      return actionMap;
+    }
+
+    test('should render shaped nodes with tooltip explanations and labeled edges', () => {
+      const actionMap = makeOverview({
+        startElementReference: 'Check',
+        decisions: [{
+          name: 'Check',
+          label: 'Check Status',
+          rules: [{ label: 'Is Active', connector: { targetReference: 'Create_Task' } }]
+        }],
+        recordCreates: [{
+          name: 'Create_Task', label: 'Create Task', object: 'Task',
+          faultConnector: { targetReference: 'Check' }
+        }]
+      });
+
+      const diagram = FlowParserShared.generateMermaidDiagram(actionMap, 'My Flow');
+
+      expect(diagram).toContain('title: "My Flow"');
+      expect(diagram).toContain('flowchart TD');
+      // start is a stadium, the decision a diamond, the create a rectangle
+      expect(diagram).toContain('Start(["Start"])');
+      expect(diagram).toContain('Check{"Check Status<br/>(decision)"}');
+      expect(diagram).toContain('Create_Task["Create Task<br/>(recordCreate)<br/>inserts Task record"]');
+      // edges carry the branch labels; the fault path is dotted
+      expect(diagram).toContain('Start --> Check');
+      expect(diagram).toContain('Check -->|"after checking Check Status: Is Active"| Create_Task');
+      expect(diagram).toContain('Create_Task -.->|"if Create Task fails"| Check');
+    });
+
+    test('should escape quotes and pipes in labels', () => {
+      const actionMap = makeOverview({
+        startElementReference: 'Get_It',
+        recordLookups: [{ name: 'Get_It', label: 'Get "A|B" Records', object: 'Account' }]
+      });
+
+      const diagram = FlowParserShared.generateMermaidDiagram(actionMap);
+
+      expect(diagram).toContain('Get_It["Get #quot;A/B#quot; Records');
+      expect(diagram).not.toContain('"A|B"');
+    });
+
+    test('should skip edges to dangling targets and non-canvas elements', () => {
+      const actionMap = makeOverview({
+        startElementReference: 'Assign_It',
+        assignments: [{
+          name: 'Assign_It', label: 'Assign It',
+          assignmentItems: [],
+          connector: { targetReference: 'Gone' }
+        }],
+        variables: [{ name: 'varX', dataType: 'String' }]
+      });
+
+      const diagram = FlowParserShared.generateMermaidDiagram(actionMap);
+
+      expect(diagram).not.toContain('Gone');
+      expect(diagram).not.toContain('varX');
+    });
+  });
+
   describe('lintFlow', () => {
     function lint(flowDefinition) {
       const { actionMap } = FlowParserShared.getFlowOverview(flowDefinition);

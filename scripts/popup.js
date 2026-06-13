@@ -570,9 +570,13 @@ class FlowParser {
                 + subflowLines.map( aLine => `- ${ aLine }` ).join( '\n' ) + '\n';
         }
 
+        // diagram of the full graph, with the tooltip explanations per node
+        const mermaidDiagram = FlowParserShared.generateMermaidDiagram(
+                                    actionMap, flowDefinition.label );
+
         createFlowTable( { flowName, flowDescription
                         , processType: flowDefinition.processType
-                        , tableRows, actionMap, stepByStepMDTable } );
+                        , tableRows, actionMap, stepByStepMDTable, mermaidDiagram } );
 
         // let csvFlow = getCSVFromMarkDown( stepByStepMDTable );
         // console.log( csvFlow );
@@ -676,7 +680,7 @@ function appendMultilineText( container, text ) {
 
 // builds the flow table with DOM APIs from the structured rows;
 // the markdown version is kept only for the download button and GPT
-function createFlowTable( { flowName, flowDescription, processType, tableRows, actionMap, stepByStepMDTable } ) {
+function createFlowTable( { flowName, flowDescription, processType, tableRows, actionMap, stepByStepMDTable, mermaidDiagram } ) {
     dom.flowTableContainer.style.display = 'block';
     dom.flowTableContainer.innerHTML = '';
 
@@ -744,32 +748,42 @@ function createFlowTable( { flowName, flowDescription, processType, tableRows, a
 
     dom.flowTableContainer.appendChild( table );
 
-    // use existing download button
-    // (handler property so re-parsing replaces the handler instead of stacking duplicates)
+    // download buttons (handler properties so re-parsing replaces the
+    // handlers instead of stacking duplicates)
+    const plainFlowName = flowName.replace( 'Flow:  ', '' );
+
+    // the markdown download embeds the diagram in a fenced block so GitHub
+    // and VS Code render it; the AI input is not affected
     let downloadButton = document.getElementById( 'downloadButton' );
     downloadButton.style.display = 'block';
     downloadButton.onclick = () => {
-        // create blob with markdown for download
-        let markDownDescription = new Blob( [stepByStepMDTable], { type: 'text/markdown' } );
-        const url = URL.createObjectURL( markDownDescription );
-        const anchor = document.createElement( 'a' );
-        anchor.href = url;
-        anchor.download = flowName.replace( 'Flow:  ', '' ) + ' - flowDefinition.md';
-    
-        // Append to the DOM
-        document.body.appendChild( anchor );
-    
-        // Trigger `click` event
-        anchor.click();
-    
-        // Remove element from DOM
-        document.body.removeChild( anchor );
-
-        // release memory from file
-        URL.revokeObjectURL( url );
+        let markdown = stepByStepMDTable;
+        if( mermaidDiagram ) {
+            markdown += '\n```mermaid\n' + mermaidDiagram + '\n```\n';
+        }
+        downloadTextFile( plainFlowName + ' - flowDefinition.md', markdown, 'text/markdown' );
     };
 
-    // table and button are already in the document, no need to append
+    let downloadMermaidButton = document.getElementById( 'downloadMermaidButton' );
+    downloadMermaidButton.style.display = 'block';
+    downloadMermaidButton.onclick = () => {
+        downloadTextFile( plainFlowName + ' - diagram.mmd', mermaidDiagram, 'text/plain' );
+    };
+}
+
+function downloadTextFile( fileName, content, mimeType ) {
+    const blob = new Blob( [ content ], { type: mimeType } );
+    const url = URL.createObjectURL( blob );
+    const anchor = document.createElement( 'a' );
+    anchor.href = url;
+    anchor.download = fileName;
+
+    document.body.appendChild( anchor );
+    anchor.click();
+    document.body.removeChild( anchor );
+
+    // release memory from file
+    URL.revokeObjectURL( url );
 }
 
 // shows recent production failures/pauses of this flow under the explanation

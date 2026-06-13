@@ -33,6 +33,7 @@ describe('popup parse integration', () => {
         <input type="text" id="custom-model-name" style="display:none;" />
       </div>
       <button id="downloadButton" style="display:none;"></button>
+      <button id="downloadMermaidButton" style="display:none;"></button>
       <div id="flowTableContainer" style="display:none;"></div>
     `;
 
@@ -138,6 +139,10 @@ describe('popup parse integration', () => {
     expect(statsLine.textContent).toContain('failed 14 times');
     expect(statsLine.textContent).toContain('2 paused interviews');
     expect(statsLine.textContent).toContain('last 7 days');
+
+    // both download buttons are available
+    expect(document.getElementById('downloadButton').style.display).toBe('block');
+    expect(document.getElementById('downloadMermaidButton').style.display).toBe('block');
   });
 
   test('should re-render without enrichment data and drop the stats line', async () => {
