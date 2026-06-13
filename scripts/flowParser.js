@@ -56,16 +56,203 @@ globalThis.FlowParserShared = ( function() {
         return definitionMap;
     }
 
-    // finds a flow element by its label across all collections and tags it
-    // with its type name
-    function findElementByLabel( definitionMap, label ) {
+    // finds every flow element matching a label across all collections,
+    // tagging each with its type name; more than one means the label is
+    // ambiguous (different API names, same label), which the DOM hover
+    // cannot tell apart since Salesforce does not expose the API name
+    function findElementsByLabel( definitionMap, label ) {
+        const matches = [];
         for( const [ typeName, elements ] of definitionMap ) {
-            const element = elements.find( anElement => anElement.label === label );
-            if( element ) {
-                element.type = typeName;
-                return element;
+            elements.forEach( anElement => {
+                if( anElement.label === label ) {
+                    anElement.type = typeName;
+                    matches.push( anElement );
+                }
+            } );
+        }
+        return matches;
+    }
+
+    // convenience for callers that only need the first match
+    function findElementByLabel( definitionMap, label ) {
+        return findElementsByLabel( definitionMap, label )[ 0 ] ?? null;
+    }
+
+    // parses the auto-layout card's assistive text into a topology signature.
+    // Examples:
+    //   "On path (fault), followed by End, 1 incoming connector"
+    //   "On outcome ({0}), followed by End"
+    // Recognized fields: the connector kind it is reached by (fault path vs
+    // decision outcome), the specific outcome label when Salesforce renders a
+    // real one (not the "{0}" placeholder), the element it is followed by, and
+    // the incoming-connector count.  Returns null when nothing usable is
+    // present so callers make no assumptions.
+    function parseAutoLayoutTopology( assistiveText ) {
+        if( ! assistiveText ) {
+            return null;
+        }
+        const signature = {};
+
+        // "On path (fault)" -> reached by a fault connector;
+        // "On outcome (Yes)" -> reached by a decision outcome connector
+        const reachedBy = /On (path|outcome) \(([^)]*)\)/i.exec( assistiveText );
+        if( reachedBy ) {
+            const kind = reachedBy[ 1 ].toLowerCase();
+            const name = reachedBy[ 2 ].trim();
+            if( kind === 'outcome' ) {
+                signature.incomingType = 'outcome';
+                // ignore the unsubstituted placeholder Salesforce sometimes leaves
+                if( name && name !== '{0}' ) {
+                    signature.outcomeLabel = name;
+                }
+            } else if( /fault/i.test( name ) ) {
+                signature.incomingType = 'fault';
             }
         }
+
+        const followedBy = /followed by (.+?)\s*(?:,|$)/i.exec( assistiveText );
+        if( followedBy ) {
+            signature.followedBy = followedBy[ 1 ].trim();
+        }
+        const incoming = /(\d+)\s+incoming connector/i.exec( assistiveText );
+        if( incoming ) {
+            signature.inDegree = Number( incoming[ 1 ] );
+        }
+
+        return Object.keys( signature ).length > 0 ? signature : null;
+    }
+
+    // the label of the element this one flows into via its primary (success
+    // or default) connector; "End" when there is no onward connector, or
+    // null when the target is not a known element (so we never guess)
+    function primarySuccessorLabel( element, definitionMap ) {
+        const target = element.connector?.targetReference
+                    ?? element.defaultConnector?.targetReference;
+        if( ! target ) {
+            return 'End';
+        }
+        for( const elements of definitionMap.values() ) {
+            const found = elements.find( anElement => anElement.name === target );
+            if( found ) {
+                return found.label ?? null;
+            }
+        }
+        return null;
+    }
+
+    // counts incoming connectors per element name across the whole graph
+    function computeInDegrees( actionMap ) {
+        const inDegree = new Map();
+        for( const element of actionMap.values() ) {
+            ( element.branchArray ?? [] ).forEach( target => {
+                if( target ) {
+                    inDegree.set( target, ( inDegree.get( target ) ?? 0 ) + 1 );
+                }
+            } );
+        }
+        return inDegree;
+    }
+
+    // classifies, per element name, the kinds of connectors that lead INTO it
+    // ('fault' from a fault path, 'outcome' from a decision rule/default, and
+    // 'normal' otherwise) plus the decision outcome labels — this mirrors the
+    // "On path (fault)" / "On outcome (Yes)" prefix in the auto-layout card
+    function classifyIncomingConnectors( definitionMap ) {
+        const byName = new Map();
+        const record = ( target, type, outcomeLabel ) => {
+            if( ! target ) {
+                return;
+            }
+            let entry = byName.get( target );
+            if( ! entry ) {
+                entry = { types: new Set(), outcomes: new Set() };
+                byName.set( target, entry );
+            }
+            entry.types.add( type );
+            if( outcomeLabel ) {
+                entry.outcomes.add( outcomeLabel );
+            }
+        };
+
+        for( const elements of definitionMap.values() ) {
+            elements.forEach( element => {
+                record( element.faultConnector?.targetReference, 'fault' );
+
+                // decision outcomes:  each rule and the default outcome
+                ( element.rules ?? [] ).forEach( aRule =>
+                    record( aRule.connector?.targetReference, 'outcome', aRule.label ) );
+                if( element.rules && element.defaultConnector?.targetReference ) {
+                    record( element.defaultConnector.targetReference, 'outcome'
+                        , element.defaultConnectorLabel );
+                }
+
+                // ordinary forward paths
+                record( element.connector?.targetReference, 'normal' );
+                record( element.nextValueConnector?.targetReference, 'normal' );
+                record( element.noMoreValuesConnector?.targetReference, 'normal' );
+                ( element.waitEvents ?? [] ).forEach( aWait =>
+                    record( aWait.connector?.targetReference, 'normal' ) );
+                ( element.scheduledPaths ?? [] ).forEach( aPath =>
+                    record( aPath.connector?.targetReference, 'normal' ) );
+            } );
+        }
+        return byName;
+    }
+
+    // best-effort disambiguation of several same-label elements (auto-layout
+    // only) using the card's assistive topology text.  Applies each available
+    // signal as a successive filter — the element it is followed by, the kind
+    // of connector it is reached by, the specific decision outcome, then the
+    // incoming-connector count — and returns a match only when exactly one
+    // candidate remains.  If any signal agrees with no candidate (our reading
+    // disagrees with the metadata) it bails to null, so the caller keeps the
+    // first match and shows the duplicate warning rather than guessing.
+    function resolveAmbiguousElement( flowDefinition, matches, assistiveText ) {
+        const observed = parseAutoLayoutTopology( assistiveText );
+        if( ! observed || ! Array.isArray( matches ) || matches.length < 2 ) {
+            return null;
+        }
+
+        const definitionMap = buildDefinitionMap( flowDefinition );
+        const incomingByName = classifyIncomingConnectors( definitionMap );
+        let inDegree = null;
+
+        const filters = [];
+        if( observed.followedBy !== undefined ) {
+            filters.push( aCandidate =>
+                primarySuccessorLabel( aCandidate, definitionMap ) === observed.followedBy );
+        }
+        if( observed.incomingType ) {
+            filters.push( aCandidate =>
+                !! incomingByName.get( aCandidate.name )?.types.has( observed.incomingType ) );
+        }
+        if( observed.outcomeLabel ) {
+            filters.push( aCandidate =>
+                !! incomingByName.get( aCandidate.name )?.outcomes.has( observed.outcomeLabel ) );
+        }
+        if( observed.inDegree !== undefined ) {
+            filters.push( aCandidate => {
+                if( ! inDegree ) {
+                    inDegree = computeInDegrees( buildElementGraph( flowDefinition ).actionMap );
+                }
+                return ( inDegree.get( aCandidate.name ) ?? 0 ) === observed.inDegree;
+            } );
+        }
+
+        let candidates = matches;
+        for( const aFilter of filters ) {
+            const narrowed = candidates.filter( aFilter );
+            // a signal that matches nothing means our reading is off; make no
+            // assumption rather than risk surfacing the wrong element
+            if( narrowed.length === 0 ) {
+                return null;
+            }
+            candidates = narrowed;
+            if( candidates.length === 1 ) {
+                return candidates[ 0 ];
+            }
+        }
+
         return null;
     }
 
@@ -341,9 +528,19 @@ globalThis.FlowParserShared = ( function() {
         }
 
         let undescribedCount = 0;
+        // collect canvas-element labels to catch duplicates (same label,
+        // different API names), which the hover and metadata lookups cannot
+        // tell apart since Salesforce does not expose the API name
+        const namesByLabel = new Map();
         for( const [ name, element ] of actionMap ) {
             if( element.type === 'start' ) {
                 continue;
+            }
+
+            if( element.label && CONNECTABLE_TYPES.has( element.type ) ) {
+                const sharing = namesByLabel.get( element.label ) ?? [];
+                sharing.push( name );
+                namesByLabel.set( element.label, sharing );
             }
 
             const isDML = DML_TYPES.has( element.type );
@@ -386,6 +583,14 @@ globalThis.FlowParserShared = ( function() {
         if( undescribedCount > 0 ) {
             issues.push( { severity: 'info'
                 , message: `${ undescribedCount } element(s) have no description.` } );
+        }
+
+        for( const [ label, names ] of namesByLabel ) {
+            if( names.length > 1 ) {
+                issues.push( { severity: 'warning'
+                    , message: `${ names.length } elements share the label "${ label }"`
+                        + ` (${ names.join( ', ' ) }) — the hover and metadata lookups cannot tell them apart.` } );
+            }
         }
 
         return issues;
@@ -522,6 +727,8 @@ globalThis.FlowParserShared = ( function() {
         , getValue
         , buildDefinitionMap
         , findElementByLabel
+        , findElementsByLabel
+        , resolveAmbiguousElement
         , removeHTML
         , describeScreen
         , buildElementGraph

@@ -31,6 +31,7 @@ const SELECTORS = {
 
 // shared parsing helpers from flowParser.js, which the manifest loads first
 const { getValue, removeHTML, buildDefinitionMap, findElementByLabel
+        , findElementsByLabel, resolveAmbiguousElement
         , getFlowOverview, renderExplanation } = FlowParserShared;
 
 // the start-node tooltip shows at most this many summary lines
@@ -389,6 +390,37 @@ function appendNodeAndLine( aNode ) {
     tooltip.appendChild( document.createElement( "br" ) );
 }
 
+// reads the auto-layout card's "secondary" assistive text for the hovered
+// element (the topology hint Salesforce renders for screen readers, e.g.
+// "On path (fault), followed by End, 1 incoming connector").  The hovered
+// node may be the card, its header, or an enclosing node-container, so we
+// anchor on the element's own .slds-card (up or down) and read its
+// aria-describedby="secondary-NNN ..." target, falling back to a secondary
+// assistive node inside that card.  Returns '' when nothing is found so the
+// caller simply skips disambiguation.
+function getAutoLayoutTopologyText( element ) {
+    if( ! element || typeof element.closest !== 'function' ) {
+        return '';
+    }
+
+    let card = element.closest( '.slds-card' )
+            || element.querySelector?.( '.slds-card' )
+            || element;
+
+    let secondaryId = ( card.getAttribute?.( 'aria-describedby' ) || '' )
+                        .split( /\s+/ )
+                        .find( anId => anId.startsWith( 'secondary-' ) );
+    if( secondaryId ) {
+        let node = document.getElementById( secondaryId );
+        if( node ) {
+            return node.textContent || '';
+        }
+    }
+
+    let fallback = card.querySelector?.( '.slds-assistive-text[id^="secondary-"]' );
+    return fallback ? ( fallback.textContent || '' ) : '';
+}
+
 // arrow geometry:  the shaft spans the gap between the element and the
 // tooltip, with the tip slightly overlapping the element's right edge
 const ARROW_SHAFT_LENGTH = 150;
@@ -519,16 +551,43 @@ function displayTooltip( event, displayFlag ) {
     // handle flows in auto-layout or free-form
     let elementName = event.currentTarget.dataset.flowElementName;
 
-    // find element node in the flow metadata
-    let node = findElementByLabel( definitionMap, elementName );
+    // find element node(s) in the flow metadata;  more than one match means
+    // several elements share this label with different API names, which the
+    // hover cannot tell apart (Salesforce does not expose the API name here)
+    let matches = findElementsByLabel( definitionMap, elementName );
+    let node = matches[ 0 ];
     if( ! node ) {
         return;
+    }
+
+    // best-effort: in auto-layout the card carries assistive text describing
+    // the element's graph context, which can single out the right one of
+    // several same-label elements; free-form has no such hint
+    if( matches.length > 1 && autoLayout ) {
+        let topologyText = getAutoLayoutTopologyText( event.currentTarget );
+        let resolved = resolveAmbiguousElement( flowDefinition, matches, topologyText );
+        if( resolved ) {
+            node = resolved;
+        }
     }
 
     createTooltip( {
         elementName: elementName
         , currentTarget: event.currentTarget
     } );
+
+    // warn when the label is ambiguous so the reader knows this may describe
+    // a different element of the same name, even when we resolved a best guess
+    if( matches.length > 1 ) {
+        let apiNames = matches.map( aMatch => aMatch.name ).join( ', ' );
+        let warningNode = document.createElement( "strong" );
+        warningNode.style.color = "darkred";
+        warningNode.textContent = `⚠ ${ matches.length } elements share this label`
+                                + ` (API names: ${ apiNames }).  Showing "${ node.name }"`
+                                + ` — Salesforce does not expose the API name on hover, so this`
+                                + ` may be the wrong one.`;
+        appendNodeAndLine( warningNode );
+    }
 
     // get subflow name if calling subflow
     try {

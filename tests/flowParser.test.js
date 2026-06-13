@@ -57,6 +57,191 @@ describe('FlowParserShared', () => {
       const definitionMap = FlowParserShared.buildDefinitionMap({});
       expect(FlowParserShared.findElementByLabel(definitionMap, 'Nope')).toBeNull();
     });
+
+    test('should return the first match even when the label is ambiguous', () => {
+      const definitionMap = FlowParserShared.buildDefinitionMap({
+        recordUpdates: [
+          { name: 'Update_Record', label: 'Update Record' },
+          { name: 'Update_Record0', label: 'Update Record' }
+        ]
+      });
+      expect(FlowParserShared.findElementByLabel(definitionMap, 'Update Record').name)
+        .toBe('Update_Record');
+    });
+  });
+
+  describe('findElementsByLabel', () => {
+    test('should return every element sharing a label, each tagged with its type', () => {
+      const definitionMap = FlowParserShared.buildDefinitionMap({
+        recordUpdates: [
+          { name: 'Update_Record', label: 'Update Record' },
+          { name: 'Update_Record0', label: 'Update Record' }
+        ],
+        screens: [{ name: 'S1', label: 'Update Record' }]
+      });
+
+      const matches = FlowParserShared.findElementsByLabel(definitionMap, 'Update Record');
+
+      expect(matches.map(aMatch => aMatch.name))
+        .toEqual(['Update_Record', 'Update_Record0', 'S1']);
+      expect(matches.map(aMatch => aMatch.type))
+        .toEqual(['recordUpdates', 'recordUpdates', 'screens']);
+    });
+
+    test('should return a single-element array for a unique label', () => {
+      const definitionMap = FlowParserShared.buildDefinitionMap({
+        recordLookups: [{ name: 'L1', label: 'Get Records' }]
+      });
+      expect(FlowParserShared.findElementsByLabel(definitionMap, 'Get Records'))
+        .toHaveLength(1);
+    });
+
+    test('should return an empty array when nothing matches', () => {
+      const definitionMap = FlowParserShared.buildDefinitionMap({});
+      expect(FlowParserShared.findElementsByLabel(definitionMap, 'Nope')).toEqual([]);
+    });
+  });
+
+  describe('resolveAmbiguousElement', () => {
+    // two record updates share the label "Update Record"; one is followed by
+    // End, the other by a screen
+    function ambiguousFlow() {
+      return {
+        startElementReference: 'Start_Decision',
+        decisions: [{
+          name: 'Start_Decision', label: 'Start',
+          defaultConnectorLabel: 'Else',
+          defaultConnector: { targetReference: 'Update_Record0' },
+          rules: [{ name: 'R', label: 'Yes',
+            connector: { targetReference: 'Update_Record' } }]
+        }],
+        recordUpdates: [
+          { name: 'Update_Record', label: 'Update Record', object: 'Account' },
+          { name: 'Update_Record0', label: 'Update Record', object: 'Account',
+            connector: { targetReference: 'Notify' } }
+        ],
+        screens: [{ name: 'Notify', label: 'Notify', fields: [] }]
+      };
+    }
+
+    function matchesFor(flowDefinition, label) {
+      return FlowParserShared.findElementsByLabel(
+        FlowParserShared.buildDefinitionMap(flowDefinition), label);
+    }
+
+    test('should pick the element whose successor matches the assistive text', () => {
+      const flow = ambiguousFlow();
+      const matches = matchesFor(flow, 'Update Record');
+
+      // "followed by Notify" identifies Update_Record0; "followed by End"
+      // identifies Update_Record
+      expect(FlowParserShared.resolveAmbiguousElement(
+        flow, matches, 'On outcome (Else), followed by Notify, 1 incoming connector').name)
+        .toBe('Update_Record0');
+      expect(FlowParserShared.resolveAmbiguousElement(
+        flow, matches, 'On outcome (Yes), followed by End, 1 incoming connector').name)
+        .toBe('Update_Record');
+    });
+
+    test('should break a successor tie on the incoming-connector count', () => {
+      // both share the label and both terminate (followed by End), so the
+      // successor cannot tell them apart; A has one incoming connector, B two
+      const flow = {
+        startElementReference: 'Feed_A',
+        recordLookups: [
+          { name: 'Feed_A', label: 'Feed A', object: 'Account',
+            connector: { targetReference: 'A' } },
+          { name: 'Feed_B1', label: 'Feed B1', object: 'Account',
+            connector: { targetReference: 'B' } },
+          { name: 'Feed_B2', label: 'Feed B2', object: 'Account',
+            connector: { targetReference: 'B' } }
+        ],
+        recordUpdates: [
+          { name: 'A', label: 'Touch', object: 'Account' },
+          { name: 'B', label: 'Touch', object: 'Account' }
+        ]
+      };
+      const matches = FlowParserShared.findElementsByLabel(
+        FlowParserShared.buildDefinitionMap(flow), 'Touch');
+
+      // both are "followed by End"; B is reached by Feed_B1 and Feed_B2
+      expect(FlowParserShared.resolveAmbiguousElement(
+        flow, matches, 'followed by End, 2 incoming connectors').name).toBe('B');
+      expect(FlowParserShared.resolveAmbiguousElement(
+        flow, matches, 'followed by End, 1 incoming connector').name).toBe('A');
+    });
+
+    test('should return null when the text cannot single one out', () => {
+      const flow = ambiguousFlow();
+      const matches = matchesFor(flow, 'Update Record');
+      // a successor that matches neither candidate -> no assumption
+      expect(FlowParserShared.resolveAmbiguousElement(
+        flow, matches, 'followed by Nowhere')).toBeNull();
+      // no usable assistive text at all
+      expect(FlowParserShared.resolveAmbiguousElement(flow, matches, '')).toBeNull();
+      expect(FlowParserShared.resolveAmbiguousElement(flow, matches, undefined)).toBeNull();
+    });
+
+    test('should return null when there is nothing to disambiguate', () => {
+      const flow = ambiguousFlow();
+      const single = matchesFor(flow, 'Notify');
+      expect(FlowParserShared.resolveAmbiguousElement(
+        flow, single, 'followed by End')).toBeNull();
+    });
+
+    test('should tell apart two terminal screens by fault path vs decision outcome', () => {
+      // the real-world case: two "Error" screens that both end, one reached by
+      // a fault path, the other by a decision outcome
+      const flow = {
+        startElementReference: 'Do_Work',
+        recordCreates: [{
+          name: 'Do_Work', label: 'Do Work', object: 'Account',
+          connector: { targetReference: 'Check' },
+          faultConnector: { targetReference: 'Error_Fault' }
+        }],
+        decisions: [{
+          name: 'Check', label: 'Check', defaultConnectorLabel: 'No',
+          defaultConnector: { targetReference: 'Error_Outcome' },
+          rules: [{ name: 'Yes', label: 'Yes', connector: { targetReference: 'Done' } }]
+        }],
+        screens: [
+          { name: 'Error_Fault', label: 'Error', fields: [] },
+          { name: 'Error_Outcome', label: 'Error', fields: [] },
+          { name: 'Done', label: 'Done', fields: [] }
+        ]
+      };
+      const matches = matchesFor(flow, 'Error');
+      expect(matches).toHaveLength(2);
+
+      // the fault card's assistive text resolves to the fault-reached screen
+      expect(FlowParserShared.resolveAmbiguousElement(
+        flow, matches, 'On path (fault), followed by End, 1 incoming connector').name)
+        .toBe('Error_Fault');
+      // the outcome card (with the unsubstituted {0}) resolves to the other
+      expect(FlowParserShared.resolveAmbiguousElement(
+        flow, matches, 'On outcome ({0}), followed by End').name)
+        .toBe('Error_Outcome');
+    });
+
+    test('should tell apart two elements on different named decision outcomes', () => {
+      const flow = {
+        startElementReference: 'Check',
+        decisions: [{
+          name: 'Check', label: 'Check', defaultConnectorLabel: 'Else',
+          defaultConnector: { targetReference: 'Note_Else' },
+          rules: [{ name: 'Hot', label: 'Hot', connector: { targetReference: 'Note_Hot' } }]
+        }],
+        screens: [
+          { name: 'Note_Hot', label: 'Note', fields: [] },
+          { name: 'Note_Else', label: 'Note', fields: [] }
+        ]
+      };
+      const matches = matchesFor(flow, 'Note');
+      expect(FlowParserShared.resolveAmbiguousElement(
+        flow, matches, 'On outcome (Hot), followed by End').name).toBe('Note_Hot');
+      expect(FlowParserShared.resolveAmbiguousElement(
+        flow, matches, 'On outcome (Else), followed by End').name).toBe('Note_Else');
+    });
   });
 
   describe('buildElementGraph', () => {
@@ -328,6 +513,32 @@ describe('FlowParserShared', () => {
         && i.message.includes('unreachable'))).toBe(true);
       expect(issues.some(i => i.message === 'The flow has no description.')).toBe(true);
       expect(issues.some(i => i.message.includes('have no description'))).toBe(true);
+    });
+
+    test('should flag canvas elements that share the same label', () => {
+      const issues = lint({
+        description: 'documented',
+        startElementReference: 'Update_Record',
+        recordUpdates: [
+          { name: 'Update_Record', label: 'Update Record', object: 'Account', description: 'd',
+            connector: { targetReference: 'Update_Record0' } },
+          { name: 'Update_Record0', label: 'Update Record', object: 'Account', description: 'd' }
+        ]
+      });
+
+      expect(issues.some(i => i.severity === 'warning'
+        && i.message.includes('share the label "Update Record"')
+        && i.message.includes('Update_Record, Update_Record0'))).toBe(true);
+    });
+
+    test('should not flag a label that is unique', () => {
+      const issues = lint({
+        description: 'documented',
+        startElementReference: 'Get_Account',
+        recordLookups: [{ name: 'Get_Account', label: 'Get Account', object: 'Account', description: 'd' }]
+      });
+
+      expect(issues.some(i => i.message.includes('share the label'))).toBe(false);
     });
   });
 
