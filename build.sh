@@ -1,1 +1,1 @@
-zip -r SalesforceFlowExtension.zip manifest.json LICENSE README.MD popup.* scripts/ images/
+zip -r SalesforceFlowExtension.zip manifest.json LICENSE README.md rules.json popup.* scripts/ images/
